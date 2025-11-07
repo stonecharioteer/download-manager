@@ -41,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dest = File::create(&fname)?;
     let content = response.bytes()?;
     dest.write_all(&content)?;
+    dest.sync_all()?;
 
     let mut file = fs::File::open(fname)?;
     let mut hasher = Sha256::new();
