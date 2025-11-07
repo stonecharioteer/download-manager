@@ -3,6 +3,9 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+use hex;
+use sha2::{Digest, Sha256};
+
 use clap::Parser;
 
 #[derive(Parser)]
@@ -39,5 +42,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let content = response.bytes()?;
     dest.write_all(&content)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&content);
+    let result = hex::encode(hasher.finalize());
+    println!("Sha256sum: {:?}", result);
     Ok(())
 }
