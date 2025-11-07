@@ -1,5 +1,6 @@
 use std::fs;
 use std::fs::File;
+use std::io;
 use std::io::Write;
 use std::path::Path;
 
@@ -28,22 +29,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let response = reqwest::blocking::get(target_file)?;
 
-    let mut dest = {
-        let fname = response
-            .url()
-            .path_segments()
-            .and_then(|segments| segments.last())
-            .and_then(|name| if name.is_empty() { None } else { Some(name) })
-            .unwrap_or("tmp.bin");
-        println!("File to download: '{}'", fname);
-        let fname = target_dir.join(fname);
-        println!("File will be located under: '{:?}'", fname);
-        File::create(fname)?
-    };
+    let fname = response
+        .url()
+        .path_segments()
+        .and_then(|segments| segments.last())
+        .and_then(|name| if name.is_empty() { None } else { Some(name) })
+        .unwrap_or("tmp.bin");
+    println!("File to download: '{}'", fname);
+    let fname = target_dir.join(fname);
+    println!("File will be located under: '{:?}'", fname);
+    let mut dest = File::create(&fname)?;
     let content = response.bytes()?;
     dest.write_all(&content)?;
+
+    let mut file = fs::File::open(fname)?;
     let mut hasher = Sha256::new();
-    hasher.update(&content);
+    let _ = io::copy(&mut file, &mut hasher)?;
     let result = hex::encode(hasher.finalize());
     println!("Sha256sum: {:?}", result);
     Ok(())
