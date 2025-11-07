@@ -3,10 +3,25 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(version, about, long_about=None)]
+struct Cli {
+    /// URL to a file to download
+    url: String,
+
+    /// Target directory
+    #[arg(short, long, default_value = ".download")]
+    target_directory: String,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let target_dir = Path::new(".download");
+    let cli = Cli::parse();
+
+    let target_file = cli.url;
+    let target_dir = Path::new(&cli.target_directory);
     fs::create_dir_all(target_dir)?;
-    let target_file = "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64/alpine-standard-3.22.2-x86_64.iso";
 
     let response = reqwest::blocking::get(target_file)?;
 
@@ -19,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or("tmp.bin");
         println!("File to download: '{}'", fname);
         let fname = target_dir.join(fname);
-        println!("File will be located under: '{:?}", fname);
+        println!("File will be located under: '{:?}'", fname);
         File::create(fname)?
     };
     let content = response.bytes()?;
