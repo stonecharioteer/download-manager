@@ -1,7 +1,6 @@
 use std::fs;
 use std::fs::File;
-use std::io;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use hex;
@@ -19,8 +18,8 @@ struct Cli {
     #[arg(short, long, default_value = ".download")]
     target_directory: String,
 
-    #[arg(short, long, default_value_t = 64)]
-    chunk_size: u16,
+    #[arg(short, long, default_value_t = 65_536)]
+    chunk_size: usize,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target_dir = Path::new(&cli.target_directory);
     fs::create_dir_all(target_dir)?;
 
-    let response = reqwest::blocking::get(target_file)?;
+    let mut response = reqwest::blocking::get(target_file)?;
 
     if !response.status().is_success() {
         return Err("Error getting the file.".into());
@@ -54,13 +53,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fname = target_dir.join(fname);
     println!("File will be located under: '{}'.", fname.to_str().unwrap());
     let mut dest = File::create(&fname)?;
-    let content = response.bytes()?;
-    dest.write_all(&content)?;
+    let mut hasher = Sha256::new();
+    let chunk_size = cli.chunk_size;
+    loop {
+        let mut buffer = vec![0; chunk_size];
+        let data = response.read(&mut buffer[..])?;
+        if data == 0 {
+            break;
+        }
+        hasher.update(&buffer[..data]);
+        dest.write_all(&mut buffer[..data])?;
+    }
     dest.sync_all()?;
 
-    let mut file = fs::File::open(fname)?;
-    let mut hasher = Sha256::new();
-    let _ = io::copy(&mut file, &mut hasher)?;
     let result = hex::encode(hasher.finalize());
     println!("Sha256sum: {:?}", result);
     Ok(())
