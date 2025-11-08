@@ -1,5 +1,5 @@
 use hex;
-use indicatif::{HumanBytes, ProgressBar};
+use indicatif::{HumanBytes, HumanDuration, ProgressBar};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -52,27 +52,37 @@ fn download_file_blocking(
     chunk_size: usize,
     resume: bool,
     overwrite: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let fname = url.split('/').last().unwrap_or("tmp.bin");
     let fname = target_dir.join(fname);
     println!("File to download: '{}'.", fname.to_str().unwrap());
+    let mut resume_from = 0;
+    let mut hasher = Sha256::new();
     let mut dest = if fname.exists() && fname.is_file() {
         if overwrite {
-            // Overwrite is on, so need to truncate the file.
             let message = format!("File exists at: '{}' overwriting.", fname.to_str().unwrap());
             println!("{}", message);
-
             OpenOptions::new()
                 .read(true)
                 .write(true)
                 .truncate(true)
                 .open(&fname)?
         } else if resume {
+            resume_from = fs::metadata(&fname)?.len() as usize;
             let message = format!(
                 "File exists at: '{}', attempting to resume.",
                 fname.to_str().unwrap()
             );
             println!("{}", message);
+            let mut existing_file = fs::File::open(&fname)?;
+            let mut buffer = vec![0; chunk_size];
+            loop {
+                let bytes_read = existing_file.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..bytes_read]);
+            }
             OpenOptions::new().read(true).append(true).open(&fname)?
         } else {
             let message = format!("File exists at: '{}'", fname.to_str().unwrap());
@@ -86,14 +96,7 @@ fn download_file_blocking(
             .create(true)
             .open(&fname)?
     };
-
     println!("File will be downloaded to: '{}'.", fname.to_str().unwrap());
-    let resume_from = if fname.exists() {
-        fs::metadata(&fname)?.len() as usize
-    } else {
-        0
-    };
-
     let mut response = if resume_from > 0 {
         println!(
             "Resuming downloading from {}.",
@@ -124,22 +127,10 @@ fn download_file_blocking(
     } else {
         reqwest::blocking::get(&url)?
     };
-
-    let mut hasher = Sha256::new();
     let content_length = response.content_length();
     let mut downloaded = resume_from;
-    if resume_from > 0 {
-        let mut existing_file = fs::File::open(&fname)?;
-        let mut buffer = vec![0; chunk_size];
-        loop {
-            let bytes_read = existing_file.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..bytes_read]);
-        }
-    };
     let bar = ProgressBar::new_spinner();
+    bar.enable_steady_tick(Duration::from_millis(100));
     let interrupted = Arc::new(AtomicBool::new(false));
     let interrupted_clone = interrupted.clone();
     ctrlc::set_handler(move || {
@@ -147,7 +138,6 @@ fn download_file_blocking(
     })
     .expect("Could not set ctrlc handler");
 
-    bar.enable_steady_tick(Duration::from_millis(100));
     let mut last_update = Instant::now();
     let start_time = Instant::now();
     loop {
@@ -164,15 +154,17 @@ fn download_file_blocking(
             let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
             match content_length {
                 Some(len) => bar.set_message(format!(
-                    "Downloaded {}/{}. Speed: {} per second.",
+                    "Downloaded {}/{}. Speed: {}/s. Time Elapsed: {}.",
                     HumanBytes(downloaded as u64),
                     HumanBytes(len),
                     HumanBytes(speed),
+                    HumanDuration(start_time.elapsed()),
                 )),
                 None => bar.set_message(format!(
-                    "Downloaded {}. Speed: {} per second.",
+                    "Downloaded {}. Speed: {} per second. Time Elapsed: {}.",
                     HumanBytes(downloaded as u64),
-                    HumanBytes(speed)
+                    HumanBytes(speed),
+                    HumanDuration(start_time.elapsed()),
                 )),
             };
             last_update = Instant::now();
@@ -198,10 +190,10 @@ fn download_file_blocking(
     }
     let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
     bar.finish_with_message(format!(
-        "Downloaded {} at {} per second in {} s.",
+        "Downloaded {} at {}/s in {}.",
         HumanBytes((downloaded - resume_from) as u64),
         HumanBytes(speed),
-        start_time.elapsed().as_secs()
+        HumanDuration(start_time.elapsed())
     ));
     let file_metadata = fs::metadata(&fname)?;
     assert_eq!(file_metadata.len(), downloaded as u64);
@@ -210,19 +202,137 @@ fn download_file_blocking(
     println!("Sha256sum: {:?}", result);
     Ok(())
 }
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+#[allow(unused)]
+async fn download_file_async(
+    url: String,
+    target_dir: &Path,
+    chunk_size: usize,
+    resume: bool,
+    overwrite: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    use futures::StreamExt;
+    use tokio::fs::{File, OpenOptions};
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
+    use tokio::time::{Duration, interval};
+
+    let mut progress_interval = interval(Duration::from_secs(1));
+    let start_time = Instant::now();
+
+    let fname = url.split("/").last().unwrap_or("tmp.bin");
+    let fname = target_dir.join(fname);
+    let mut resume_from = 0;
+
+    let mut hasher = Sha256::new();
+    let mut dest = if fname.exists() && fname.is_file() {
+        if overwrite {
+            OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&fname)
+                .await?
+        } else if resume {
+            resume_from = tokio::fs::metadata(&fname).await?.len() as usize;
+            let mut existing_file = tokio::fs::File::open(&fname).await?;
+            let mut buffer = vec![0; chunk_size];
+            loop {
+                let bytes_read = existing_file.read(&mut buffer).await?;
+                if bytes_read == 0 {
+                    break;
+                };
+
+                hasher.update(&buffer[..bytes_read]);
+            }
+            OpenOptions::new().append(true).open(&fname).await?
+        } else {
+            return Err("File exists".into());
+        }
+    } else {
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&fname)
+            .await?
+    };
+    let mut downloaded = resume_from;
+
+    let response = if resume_from > 0 {
+        let resp = reqwest::Client::new()
+            .get(&url)
+            .header("Range", format!("bytes={}-", resume_from))
+            .send()
+            .await?;
+        match resp.status().as_u16() {
+            206 => resp,
+            416 => return Err("File already complete".into()),
+            200 => {
+                eprintln!("Server doesn't support resume. Try --overwrite");
+                return Err("Cannot resume.".into());
+            }
+            _ => return Err(format!("Unexpected status: {}", resp.status()).into()),
+        }
+    } else {
+        reqwest::get(&url).await?.error_for_status()?
+    };
+
+    let mut stream = response.bytes_stream();
+    let bar = ProgressBar::new_spinner();
+    bar.enable_steady_tick(Duration::from_millis(100));
+    loop {
+        tokio::select! {
+            chunk_option = stream.next() => {
+                match chunk_option {
+                    Some(chunk_result) => {
+                    let chunk = chunk_result?;
+                    dest.write_all(&chunk).await?;
+                    hasher.update(&chunk);
+                    downloaded += chunk.len();
+
+                }
+                None => break,
+            }
+            }
+            _ = progress_interval.tick() => {
+                let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
+                let message = format!("Downloaded: {}, speed: {}/s. Time Elapsed: {}.", HumanBytes(downloaded as u64), HumanBytes(speed), HumanDuration(start_time.elapsed()));
+                bar.set_message(message);
+            }
+            else => break,
+        }
+    }
+    let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
+    bar.finish_with_message(format!(
+        "Downloaded: {}, speed: {}/s. Total Time: {}.",
+        HumanBytes(downloaded as u64),
+        HumanBytes(speed),
+        HumanDuration(start_time.elapsed())
+    ));
+    let result = hex::encode(hasher.finalize());
+    println!("Sha256sum: {:?}", result);
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let cli = Cli::parse();
 
     let url = cli.url;
+
     let target_dir = Path::new(&cli.target_directory);
     fs::create_dir_all(target_dir)?;
 
     match cli.command {
         Commands::DownloadAsync => {
-            unimplemented!("Async downloads are not yet implemented.")
+            download_file_async(url, target_dir, cli.chunk_size, cli.resume, cli.overwrite).await
         }
         Commands::DownloadBlocking => {
-            download_file_blocking(url, target_dir, cli.chunk_size, cli.resume, cli.overwrite)
+            let target_dir = cli.target_directory.clone();
+            tokio::task::spawn_blocking(move || {
+                let target_dir = Path::new(&target_dir);
+                download_file_blocking(url, target_dir, cli.chunk_size, cli.resume, cli.overwrite)
+            })
+            .await?
         }
     }
 }
