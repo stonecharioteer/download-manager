@@ -196,11 +196,12 @@ fn download_file_blocking(
         eprintln!("Download cancelled!");
         return Err("Download cancelled by user.".into());
     }
-    let speed = downloaded as u64 / start_time.elapsed().as_secs().max(1);
+    let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
     bar.finish_with_message(format!(
-        "Downloaded {} at {} per second.",
-        HumanBytes(downloaded as u64),
-        HumanBytes(speed)
+        "Downloaded {} at {} per second in {} s.",
+        HumanBytes((downloaded - resume_from) as u64),
+        HumanBytes(speed),
+        start_time.elapsed().as_secs()
     ));
     let file_metadata = fs::metadata(&fname)?;
     assert_eq!(file_metadata.len(), downloaded as u64);
