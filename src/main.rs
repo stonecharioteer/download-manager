@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::time::Duration;
+use std::time::Instant;
 
 use clap::Parser;
 
@@ -54,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut downloaded = 0;
     let bar = ProgressBar::new_spinner();
     bar.enable_steady_tick(Duration::from_millis(100));
+    let mut last_update = Instant::now();
     loop {
         let mut buffer = vec![0; chunk_size];
         let data = response.read(&mut buffer[..])?;
@@ -61,14 +63,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
         downloaded += data;
-        match content_length {
-            Some(len) => bar.set_message(format!(
-                "Downloaded {}/{}.",
-                HumanBytes(downloaded as u64),
-                HumanBytes(len),
-            )),
-            None => bar.set_message(format!("Downloaded {}", HumanBytes(downloaded as u64))),
-        };
+        if last_update.elapsed() >= Duration::from_secs(1) {
+            match content_length {
+                Some(len) => bar.set_message(format!(
+                    "Downloaded {}/{}.",
+                    HumanBytes(downloaded as u64),
+                    HumanBytes(len),
+                )),
+                None => bar.set_message(format!("Downloaded {}", HumanBytes(downloaded as u64))),
+            };
+            last_update = Instant::now();
+        }
         hasher.update(&buffer[..data]);
         dest.write_all(&mut buffer[..data])?;
     }
