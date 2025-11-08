@@ -11,12 +11,15 @@ use std::sync::{
 use std::time::Duration;
 use std::time::Instant;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 /// Download manager application.
 #[derive(Parser)]
 #[command(version, about, long_about=None)]
 struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
     /// URL to a file to download
     url: String,
 
@@ -37,18 +40,24 @@ struct Cli {
     overwrite: bool,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
+#[derive(Subcommand)]
+enum Commands {
+    DownloadBlocking,
+    DownloadAsync,
+}
 
-    let target_file = cli.url;
-    let target_dir = Path::new(&cli.target_directory);
-    fs::create_dir_all(target_dir)?;
-
-    let fname = target_file.split('/').last().unwrap_or("tmp.bin");
+fn download_file_blocking(
+    url: String,
+    target_dir: &Path,
+    chunk_size: usize,
+    resume: bool,
+    overwrite: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fname = url.split('/').last().unwrap_or("tmp.bin");
     let fname = target_dir.join(fname);
     println!("File to download: '{}'.", fname.to_str().unwrap());
     let mut dest = if fname.exists() && fname.is_file() {
-        if cli.overwrite {
+        if overwrite {
             // Overwrite is on, so need to truncate the file.
             let message = format!("File exists at: '{}' overwriting.", fname.to_str().unwrap());
             println!("{}", message);
@@ -58,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .write(true)
                 .truncate(true)
                 .open(&fname)?
-        } else if cli.resume {
+        } else if resume {
             let message = format!(
                 "File exists at: '{}', attempting to resume.",
                 fname.to_str().unwrap()
@@ -91,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             HumanBytes(resume_from as u64)
         );
         let resp = reqwest::blocking::Client::new()
-            .get(&target_file)
+            .get(&url)
             .header("Range", format!("bytes={}-", resume_from))
             .send()?;
         match resp.status().as_u16() {
@@ -113,11 +122,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        reqwest::blocking::get(&target_file)?
+        reqwest::blocking::get(&url)?
     };
 
     let mut hasher = Sha256::new();
-    let chunk_size = cli.chunk_size;
     let content_length = response.content_length();
     let mut downloaded = resume_from;
     if resume_from > 0 {
@@ -200,4 +208,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = hex::encode(hasher.finalize());
     println!("Sha256sum: {:?}", result);
     Ok(())
+}
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+
+    let url = cli.url;
+    let target_dir = Path::new(&cli.target_directory);
+    fs::create_dir_all(target_dir)?;
+
+    match cli.command {
+        Commands::DownloadAsync => {
+            unimplemented!("Async downloads are not yet implemented.")
+        }
+        Commands::DownloadBlocking => {
+            download_file_blocking(url, target_dir, cli.chunk_size, cli.resume, cli.overwrite)
+        }
+    }
 }
