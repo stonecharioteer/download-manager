@@ -1,10 +1,11 @@
 use hex;
-use indicatif::HumanBytes;
+use indicatif::{HumanBytes, ProgressBar};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use clap::Parser;
 
@@ -18,7 +19,8 @@ struct Cli {
     #[arg(short, long, default_value = ".download")]
     target_directory: String,
 
-    #[arg(short, long, default_value_t = 65_536*100)]
+    /// Download chunk size
+    #[arg(short, long, default_value_t = 65_536)]
     chunk_size: usize,
 }
 
@@ -49,11 +51,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hasher = Sha256::new();
     let chunk_size = cli.chunk_size;
     let content_length = response.content_length();
-    match content_length {
-        Some(len) => println!("Downloading {} bytes.", HumanBytes(len)),
-        None => println!("Downloading size unknown. Content-Length header missing."),
-    };
     let mut downloaded = 0;
+    let bar = ProgressBar::new_spinner();
+    bar.enable_steady_tick(Duration::from_millis(100));
     loop {
         let mut buffer = vec![0; chunk_size];
         let data = response.read(&mut buffer[..])?;
@@ -61,14 +61,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
         downloaded += data;
-        println!("Downloaded {}", HumanBytes(downloaded as u64));
+        match content_length {
+            Some(len) => bar.set_message(format!(
+                "Downloaded {}/{}.",
+                HumanBytes(downloaded as u64),
+                HumanBytes(len),
+            )),
+            None => bar.set_message(format!("Downloaded {}", HumanBytes(downloaded as u64))),
+        };
         hasher.update(&buffer[..data]);
         dest.write_all(&mut buffer[..data])?;
     }
     dest.sync_all()?;
+    bar.finish_with_message(format!("Downloaded {}.", HumanBytes(downloaded as u64)));
     let file_metadata = fs::metadata(&fname)?;
-    println!("Actual File Size: {}", HumanBytes(file_metadata.len()));
-    println!("Final File Size: {}", HumanBytes(downloaded as u64));
+    assert_eq!(file_metadata.len(), downloaded as u64);
 
     let result = hex::encode(hasher.finalize());
     println!("Sha256sum: {:?}", result);
