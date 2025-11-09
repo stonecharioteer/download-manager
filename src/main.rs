@@ -1,3 +1,6 @@
+use anyhow::Result;
+use anyhow::anyhow;
+use clap::{Parser, Subcommand};
 use hex;
 use indicatif::{HumanBytes, HumanDuration, ProgressBar};
 use sha2::{Digest, Sha256};
@@ -10,8 +13,6 @@ use std::sync::{
 };
 use std::time::Duration;
 use std::time::Instant;
-
-use clap::{Parser, Subcommand};
 
 /// Download manager application.
 #[derive(Parser)]
@@ -52,7 +53,7 @@ fn download_file_blocking(
     chunk_size: usize,
     resume: bool,
     overwrite: bool,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<()> {
     let fname = url.split('/').last().unwrap_or("tmp.bin");
     let fname = target_dir.join(fname);
     println!("File to download: '{}'.", fname.to_str().unwrap());
@@ -86,7 +87,7 @@ fn download_file_blocking(
             OpenOptions::new().read(true).append(true).open(&fname)?
         } else {
             let message = format!("File exists at: '{}'", fname.to_str().unwrap());
-            return Err(message.into());
+            return Err(anyhow!(message));
         }
     } else {
         // File doesn't exist yet.
@@ -114,14 +115,14 @@ fn download_file_blocking(
             416 => {
                 // Range not satisfiable, file is likely complete.
                 println!("File appears to be complete.");
-                return Err("File already complete".into());
+                return Err(anyhow!("File already complete"));
             }
             200 => {
                 eprintln!("Server doesn't support resume for this file. Try `--overwrite`");
-                return Err("Cannot resume - server sent full file.".into());
+                return Err(anyhow!("Cannot resume - server sent full file."));
             }
             _ => {
-                return Err(format!("Unexpected status: {}", resp.status()).into());
+                return Err(anyhow!("Unexpected status: {}", resp.status()));
             }
         }
     } else {
@@ -186,7 +187,7 @@ fn download_file_blocking(
             )),
         }
         eprintln!("Download cancelled!");
-        return Err("Download cancelled by user.".into());
+        return Err(anyhow!("Download cancelled by user."));
     }
     let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
     bar.finish_with_message(format!(
@@ -210,7 +211,7 @@ async fn download_file_async(
     chunk_size: usize,
     resume: bool,
     overwrite: bool,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<()> {
     use futures::StreamExt;
     use tokio::fs::{File, OpenOptions};
     use tokio::io::AsyncReadExt;
@@ -246,7 +247,7 @@ async fn download_file_async(
             }
             OpenOptions::new().append(true).open(&fname).await?
         } else {
-            return Err("File exists".into());
+            return Err(anyhow!("File exists"));
         }
     } else {
         OpenOptions::new()
@@ -265,12 +266,12 @@ async fn download_file_async(
             .await?;
         match resp.status().as_u16() {
             206 => resp,
-            416 => return Err("File already complete".into()),
+            416 => return Err(anyhow!("File already complete")),
             200 => {
                 eprintln!("Server doesn't support resume. Try --overwrite");
-                return Err("Cannot resume.".into());
+                return Err(anyhow!("Cannot resume."));
             }
-            _ => return Err(format!("Unexpected status: {}", resp.status()).into()),
+            _ => return Err(anyhow!("Unexpected status: {}", resp.status())),
         }
     } else {
         reqwest::get(&url).await?.error_for_status()?
@@ -314,7 +315,7 @@ async fn download_file_async(
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let url = cli.url;

@@ -19,21 +19,19 @@
 - [x] Does progress update correctly in bytes/sec?
 - [x] Is output file identical in size to `Content-Length`?
 
-**Status:** ✅ **COMPLETE!** All requirements met, plus bonus resume functionality with HTTP status code handling (206, 416, 200).
-
 ---
 
 ### Task 2 — Switch to async + tokio
 
 **Build Requirements:**
-- [ ] Convert the blocking downloader into an async version
-- [ ] Use `reqwest` (async) + `tokio::fs`
-- [ ] Keep same progress reporting logic but via `tokio::time::interval`
+- [x] Convert the blocking downloader into an async version
+- [x] Use `reqwest` (async) + `tokio::fs`
+- [x] Keep same progress reporting logic but via `tokio::time::interval`
 
 **Google/Read Topics:**
-- [ ] "reqwest async stream response body"
-- [ ] "tokio::io::AsyncWriteExt example"
-- [ ] "tokio::time::interval usage"
+- [x] "reqwest async stream response body"
+- [x] "tokio::io::AsyncWriteExt example"
+- [x] "tokio::time::interval usage"
 
 **Self-Check:**
 - [ ] Are you awaiting everything correctly (no blocking code)?
