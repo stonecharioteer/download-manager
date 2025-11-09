@@ -34,9 +34,9 @@
 - [x] "tokio::time::interval usage"
 
 **Self-Check:**
-- [ ] Are you awaiting everything correctly (no blocking code)?
-- [ ] Does it use <100% CPU while downloading?
-- [ ] Can you interrupt with Ctrl+C safely (graceful shutdown)?
+- [x] Are you awaiting everything correctly (no blocking code)?
+- [x] Does it use <100% CPU while downloading?
+- [x] Can you interrupt with Ctrl+C safely (graceful shutdown)?
 
 ---
 
@@ -45,16 +45,16 @@
 **Build Requirements:**
 - [ ] Accept a `--range-start` flag
 - [ ] Accept a `--range-end` flag
-- [ ] Use `Range` header in request
+- [x] Use `Range` header in request
 - [ ] Download only that part of the file to a temp file
 
 **Google/Read Topics:**
-- [ ] "reqwest set header Range bytes example"
-- [ ] "HTTP Range header format"
-- [ ] "fs::OpenOptions append/truncate mode"
+- [x] "reqwest set header Range bytes example"
+- [x] "HTTP Range header format"
+- [x] "fs::OpenOptions append/truncate mode"
 
 **Self-Check:**
-- [ ] Does server return `206 Partial Content`?
+- [x] Does server return `206 Partial Content`?
 - [ ] Is downloaded chunk size correct?
 - [ ] Can multiple non-overlapping ranges be stitched together with `cat`?
 

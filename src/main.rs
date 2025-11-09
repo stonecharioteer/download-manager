@@ -53,6 +53,8 @@ fn download_file_blocking(
     chunk_size: usize,
     resume: bool,
     overwrite: bool,
+    bar: ProgressBar,
+    interrupted: Arc<AtomicBool>,
 ) -> Result<()> {
     let fname = url.split('/').last().unwrap_or("tmp.bin");
     let fname = target_dir.join(fname);
@@ -130,15 +132,6 @@ fn download_file_blocking(
     };
     let content_length = response.content_length();
     let mut downloaded = resume_from;
-    let bar = ProgressBar::new_spinner();
-    bar.enable_steady_tick(Duration::from_millis(100));
-    let interrupted = Arc::new(AtomicBool::new(false));
-    let interrupted_clone = interrupted.clone();
-    ctrlc::set_handler(move || {
-        interrupted_clone.store(true, Ordering::SeqCst);
-    })
-    .expect("Could not set ctrlc handler");
-
     let mut last_update = Instant::now();
     let start_time = Instant::now();
     loop {
@@ -211,6 +204,8 @@ async fn download_file_async(
     chunk_size: usize,
     resume: bool,
     overwrite: bool,
+    bar: ProgressBar,
+    interrupted: Arc<AtomicBool>,
 ) -> Result<()> {
     use futures::StreamExt;
     use tokio::fs::{File, OpenOptions};
@@ -218,7 +213,6 @@ async fn download_file_async(
     use tokio::io::AsyncWriteExt;
     use tokio::time::{Duration, interval};
 
-    let mut progress_interval = interval(Duration::from_secs(1));
     let start_time = Instant::now();
 
     let fname = url.split("/").last().unwrap_or("tmp.bin");
@@ -278,8 +272,8 @@ async fn download_file_async(
     };
 
     let mut stream = response.bytes_stream();
-    let bar = ProgressBar::new_spinner();
-    bar.enable_steady_tick(Duration::from_millis(100));
+    let mut progress_interval = interval(Duration::from_secs(1));
+    let mut interrupt_interval = interval(Duration::from_millis(500));
     loop {
         tokio::select! {
             chunk_option = stream.next() => {
@@ -293,6 +287,13 @@ async fn download_file_async(
                 }
                 None => break,
             }
+            }
+            _ = interrupt_interval.tick() => {
+                if interrupted.load(Ordering::SeqCst) {
+                    let err_message = "Download interrupted.";
+                    bar.abandon_with_message(err_message);
+                    return Err(anyhow!(err_message));
+                }
             }
             _ = progress_interval.tick() => {
                 let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
@@ -317,21 +318,44 @@ async fn download_file_async(
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-
     let url = cli.url;
-
     let target_dir = Path::new(&cli.target_directory);
     fs::create_dir_all(target_dir)?;
-
+    let bar = ProgressBar::new_spinner();
+    bar.enable_steady_tick(Duration::from_millis(100));
+    bar.set_message(format!("Attempting to download {}", url));
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_clone = interrupted.clone();
+    ctrlc::set_handler(move || {
+        interrupted_clone.store(true, Ordering::SeqCst);
+    })
+    .expect("Could not set keyboard interrupt handler.");
     match cli.command {
         Commands::DownloadAsync => {
-            download_file_async(url, target_dir, cli.chunk_size, cli.resume, cli.overwrite).await
+            download_file_async(
+                url,
+                target_dir,
+                cli.chunk_size,
+                cli.resume,
+                cli.overwrite,
+                bar,
+                interrupted,
+            )
+            .await
         }
         Commands::DownloadBlocking => {
             let target_dir = cli.target_directory.clone();
             tokio::task::spawn_blocking(move || {
                 let target_dir = Path::new(&target_dir);
-                download_file_blocking(url, target_dir, cli.chunk_size, cli.resume, cli.overwrite)
+                download_file_blocking(
+                    url,
+                    target_dir,
+                    cli.chunk_size,
+                    cli.resume,
+                    cli.overwrite,
+                    bar,
+                    interrupted,
+                )
             })
             .await?
         }
