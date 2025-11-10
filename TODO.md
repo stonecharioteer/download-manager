@@ -60,7 +60,214 @@
 
 ---
 
-## Bonus Features Implemented (Beyond README Requirements)
+### Task 4 — Concurrent chunk workers
+
+**Build Requirements:**
+- [ ] Add `--workers N` flag
+- [ ] Split file into N equal ranges
+- [ ] Spawn N `tokio::spawn` tasks for concurrent downloads
+- [ ] Each worker downloads to distinct temp file (`part.0`, `part.1`, etc.)
+- [ ] Use `futures::future::join_all` to wait for all workers
+- [ ] Each worker computes SHA256 for its chunk (for verification)
+
+**Google/Read Topics:**
+- [x] "reqwest Range header partial content example"
+- [ ] "tokio::spawn examples"
+- [ ] "futures::future::join_all usage"
+
+**Self-Check:**
+- [ ] Do all parts complete with expected byte lengths?
+- [ ] Does total time improve vs single-worker?
+- [ ] No file write clashes (each worker uses own part file)?
+
+---
+
+### Task 5 — Shared progress aggregation
+
+**Build Requirements:**
+- [ ] Add `Arc<tokio::sync::Mutex<Progress>>` for shared progress
+- [ ] Workers update shared state as they write bytes
+- [ ] Progress task reads state every 200-500ms
+- [ ] Display aggregated percent, bytes/sec, ETA
+
+**Google/Read Topics:**
+- [ ] "Arc tokio::sync::Mutex pattern"
+- [ ] "std::sync::atomic AtomicU64 example"
+- [ ] "how to compute moving bytes/sec for progress bar"
+
+**Self-Check:**
+- [ ] Aggregated progress equals sum of per-part bytes?
+- [ ] Progress reporter never blocks workers?
+- [ ] ETA/bytes-per-sec updates smoothly?
+
+---
+
+### Task 6 — Pause + resume with state persistence
+
+**Build Requirements:**
+- [ ] Handle SIGINT to write JSON state file
+- [ ] State file lists: total size, worker ranges, bytes per part, per-chunk SHA256
+- [ ] Resume: read state, download remaining bytes, append to parts
+- [ ] Resume: continue SHA256 calculation from pause point
+- [ ] Verify final concatenation yields correct file
+
+**Google/Read Topics:**
+- [ ] "serde_json write/read file example"
+- [x] "signal handling tokio ctrlc or signal-hook"
+- [ ] "atomic rename write temp file"
+
+**Self-Check:**
+- [ ] State file is truthful snapshot of progress?
+- [ ] Resume fetches only remaining bytes?
+- [ ] SHA256 calculation resumes correctly for partial chunks?
+- [ ] Final file has correct size and checksum?
+
+---
+
+### Task 7 — Merge and verify parts
+
+**Build Requirements:**
+- [ ] Merge chunk files in order into single file
+- [ ] Compute overall SHA256: combine per-chunk hashes OR hash merged file
+- [ ] Optionally verify against known checksum
+- [ ] Remove temporary part files after merge
+
+**Google/Read Topics:**
+- [ ] "Rust concatenate multiple files to one"
+- [ ] "std::fs::File seek and write_all example"
+- [x] "sha2 crate example for file hashing"
+- [ ] "SHA256 combining partial hashes" (note: may need to hash merged file instead)
+
+**Self-Check:**
+- [ ] Merged file size equals total Content-Length?
+- [ ] SHA256 checksum matches expected (verified against known hash)?
+- [ ] Temp part files safely removed?
+
+---
+
+### Task 8 — Code modularization and organization
+
+**Build Requirements:**
+- [ ] Create module structure: `cli.rs`, `download.rs`, `worker.rs`, `progress.rs`, `hash.rs`
+- [ ] Move download functions to `download` module
+- [ ] Extract CLI types to `cli` module
+- [ ] Extract progress/interrupt logic to dedicated module
+- [ ] Extract SHA256 logic to `hash` module
+- [ ] Keep `main.rs` minimal (just setup and dispatch)
+
+**Google/Read Topics:**
+- [ ] "Rust module system mod.rs vs file.rs"
+- [ ] "Rust pub use re-exports"
+- [ ] "structuring larger Rust projects"
+
+**Self-Check:**
+- [ ] Each module has single clear responsibility?
+- [ ] No circular dependencies between modules?
+- [ ] Public API surface is minimal and clear?
+
+---
+
+### Task 9 — Error handling with thiserror + anyhow
+
+**Build Requirements:**
+- [ ] Define `DownloadError` enum with variants (Network, IO, InvalidRange, etc.)
+- [ ] Convert `.expect()` and `unwrap()` to proper error propagation
+- [ ] Worker errors surfaced without panic
+
+**Google/Read Topics:**
+- [ ] "thiserror custom error example"
+- [ ] "anyhow context usage"
+- [ ] "? operator vs anyhow::Result"
+
+**Self-Check:**
+- [x] Clean, contextual error messages for failures?
+- [ ] Worker errors logged without panic?
+- [ ] Can resume after error without corruption?
+
+---
+
+### Task 10 — Structured telemetry via tracing
+
+**Build Requirements:**
+- [ ] Replace printlns with `tracing` spans and events
+- [ ] Add global subscriber (`tracing_subscriber::fmt`)
+- [ ] Structured fields: worker_id, bytes_written, elapsed_time
+
+**Google/Read Topics:**
+- [ ] "tracing spans and events example"
+- [ ] "tracing_subscriber::fmt::init usage"
+- [ ] "tracing structured logging with fields"
+
+**Self-Check:**
+- [ ] Logs tagged with worker IDs and timestamps?
+- [ ] `RUST_LOG=debug` shows detailed output?
+- [ ] Performance unaffected when tracing enabled?
+
+---
+
+### Task 11 — Refactor shared state coordination
+
+**Build Requirements:**
+- [ ] Move progress, metadata, control flags to `SharedState` struct
+- [ ] Wrap in `Arc<tokio::sync::Mutex<_>>`
+- [ ] Pass clones to each worker
+- [ ] Centralize updates and access patterns
+- [ ] Consider extracting to `state` module
+
+**Google/Read Topics:**
+- [ ] "tokio::sync::Mutex lock scope best practices"
+- [ ] "derive(Clone) for structs with Arc fields"
+- [ ] "how to avoid deadlocks with async Mutex"
+
+**Self-Check:**
+- [ ] Workers modify shared state safely?
+- [ ] Locks held for minimal time?
+- [ ] Easy to add new shared fields?
+
+---
+
+### Task 12 — Axum HTTP control plane
+
+**Build Requirements:**
+- [ ] Add Axum server with `POST /pause` and `POST /resume`
+- [ ] Endpoints modify shared state (pause flag)
+- [ ] Run alongside downloader with `tokio::select!`
+- [ ] Extract HTTP server logic to `server` or `api` module
+
+**Google/Read Topics:**
+- [ ] "axum shared state with Arc<Mutex> example"
+- [x] "tokio::select! multiple async tasks"
+- [ ] "axum router post handler json response example"
+
+**Self-Check:**
+- [ ] Pause/resume via curl works?
+- [ ] HTTP server stays responsive during downloads?
+- [ ] Workers react within 1-2 seconds?
+
+---
+
+### Task 13 — gRPC streaming progress via Tonic
+
+**Build Requirements:**
+- [ ] Add gRPC service using `tonic` for progress streaming
+- [ ] Define proto: `Progress { bytes_downloaded, total_bytes, percent }`
+- [ ] Broadcast from progress reporter to gRPC clients
+- [ ] Extract gRPC service logic to `grpc` module
+- [ ] Proto definitions in `proto/` directory
+
+**Google/Read Topics:**
+- [ ] "tonic bidirectional or server streaming example"
+- [ ] "broadcast channel for live updates tokio::sync::broadcast"
+- [ ] "generate tonic code build.rs example"
+
+**Self-Check:**
+- [ ] Connected gRPC client receives continuous updates?
+- [ ] Multiple clients can subscribe concurrently?
+- [ ] Stream properly closed when download finishes?
+
+---
+
+## Bonus Features Implemented
 
 - [x] `--resume` flag for resuming interrupted downloads
 - [x] `--overwrite` flag for overwriting existing files
@@ -73,3 +280,4 @@
 - [x] Human-readable byte formatting (HumanBytes)
 - [x] Download speed calculation and display
 - [x] Edge case handling (detects when trying to resume already-complete file)
+- [x] Error handling with `anyhow`
