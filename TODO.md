@@ -148,22 +148,38 @@
 ### Task 8 — Code modularization and organization
 
 **Build Requirements:**
-- [ ] Create module structure: `cli.rs`, `download.rs`, `worker.rs`, `progress.rs`, `hash.rs`
-- [ ] Move download functions to `download` module
-- [ ] Extract CLI types to `cli` module
-- [ ] Extract progress/interrupt logic to dedicated module
-- [ ] Extract SHA256 logic to `hash` module
-- [ ] Keep `main.rs` minimal (just setup and dispatch)
+- [x] Create module structure: `cli.rs`, `download/`, `download/mod.rs`
+- [x] Move download functions to `download` module
+- [x] Extract CLI types to `cli` module
+- [x] Keep `main.rs` minimal (just setup and dispatch)
+- [x] Add `Cli::execute()` method for clean main
+- [x] Use `Url` type for type-safe URL validation
+- [x] Extract common utils to `download/utils.rs`:
+  - [x] Filename extraction from URL (`extract_filename_from_url`)
+  - [x] SHA256 hashing post-download (`hashfile`)
+  - [x] Simplified hashing approach (compute after download, not streaming)
+  - [ ] File opening logic (resume/overwrite/create) - deferred
+  - [ ] Progress message formatting - deferred
+- [ ] Decouple progress/interrupt from download functions:
+  - [ ] Use `Arc<AtomicUsize>` for progress tracking
+  - [ ] Spawn separate task in `execute()` for progress updates
+  - [ ] Download functions only update atomics, no bar logic
+  - [ ] Interrupt checking via atomic flag only
+- [x] Download functions return `PathBuf` instead of `()`
+- [x] CLI handles hashing and printing, not download functions
 
 **Google/Read Topics:**
-- [ ] "Rust module system mod.rs vs file.rs"
-- [ ] "Rust pub use re-exports"
-- [ ] "structuring larger Rust projects"
+- [x] "Rust module system mod.rs vs file.rs"
+- [x] "Rust pub use re-exports"
+- [x] "structuring larger Rust projects"
+- [ ] "tokio mpsc channel progress reporting"
+- [ ] "Arc AtomicUsize for progress tracking"
 
 **Self-Check:**
-- [ ] Each module has single clear responsibility?
-- [ ] No circular dependencies between modules?
-- [ ] Public API surface is minimal and clear?
+- [x] Each module has single clear responsibility?
+- [x] No circular dependencies between modules?
+- [x] Public API surface is minimal and clear?
+- [ ] Download functions have no UI concerns? (still have progress bar/interrupt logic)
 
 ---
 
