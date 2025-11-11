@@ -12,9 +12,9 @@ I've built a Rust-based download manager (`dlm`) with both blocking and async im
 - **Graceful interrupts**: Ctrl-C handling with proper cleanup and error reporting
 
 **Technical Implementation:**
-The blocking version uses `std::fs` with manual chunked reading and periodic progress updates. The async version leverages `tokio::select!` to race between stream chunks, progress updates (every 1s), and interrupt checks (every 500ms).
+The blocking version uses `std::fs` with manual chunked reading. The async version leverages `tokio::select!` to race between stream chunks and interrupt checks (every 500ms).
 
-Both implementations share common UI components (progress bar, interrupt handling) through the main function, reducing duplication. The blocking function runs via `tokio::task::spawn_blocking` to avoid blocking the async runtime.
+Download functions are now pure logic - they only update atomic counters (`Arc<AtomicUsize>`, `Arc<AtomicU64>`) and return file paths. All UI concerns (progress bar, printing, timing) are handled by the CLI layer. A separate progress reporter task polls the atomics every 500ms, calculating speed and updating the progress bar. This decoupling makes download functions testable and reusable without UI dependencies.
 
 Error handling uses the `anyhow` crate for clean, thread-safe error types, replacing verbose `Box<dyn std::error::Error + Send + Sync + 'static>` signatures.
 
@@ -45,17 +45,25 @@ The async migration introduced several key differences:
 
 The `tokio::select!` pattern was particularly powerful - it allowed concurrent polling of multiple async operations (stream.next(), progress ticks, interrupt checks) without explicit threading. Whichever future completed first would execute its arm, enabling responsive progress updates and interrupts even during slow downloads.
 
-### Centralizing UI Components
+### Decoupling Progress and Interrupt Logic
 
 Originally, each download function created its own `ProgressBar` and set up its own `ctrlc` handler. This led to duplication and made the code harder to maintain.
 
-We refactored by moving both to `main()`:
-- **Progress bar**: Created once before the subcommand match, then passed as a parameter to both download functions
-- **Interrupt system**: The `ctrlc::set_handler()` can only be called once globally, so we set it in `main()` with an `Arc<AtomicBool>`. The flag is then cloned and passed to whichever download function executes
+The first refactoring moved both to `main()`, passing them as parameters to download functions. However, this still left UI concerns (calling progress bar methods, printing messages) embedded in download logic.
 
-This revealed an interesting constraint: `ProgressBar` needed to be `Send` to move into `spawn_blocking` for the blocking download. Fortunately, `indicatif`'s implementation is already thread-safe, so this compiled without issues.
+The second refactoring fully decoupled UI from logic:
+- **Created `DownloadProgress` struct**: Contains `Arc<AtomicUsize>` for bytes downloaded, `Arc<AtomicU64>` for total bytes (0 = unknown), and `Arc<AtomicBool>` for interrupts
+- **Download functions became pure**: They only update atomics via `store()` operations and return `PathBuf` results. No progress bar methods, no `println!` statements
+- **Spawned progress reporter task**: A separate `tokio::spawn` task polls atomics every 500ms, calculates speed (`bytes / elapsed_secs`), and updates the progress bar with human-readable output
+- **CLI layer handles everything user-facing**: Initial messages ("Downloading X to Y"), timing (captured before expensive hash calculation), final output with SHA256
 
-The refactoring eliminated code duplication, clarified the separation between UI concerns (main) and download logic (functions), and ensured consistent behavior across both blocking and async modes.
+This pattern enables:
+- **Lock-free communication**: Atomics provide thread-safe sharing without `Mutex` overhead
+- **Testability**: Download functions have no UI dependencies, making unit testing straightforward
+- **Reusability**: Functions can be used in different contexts (CLI, library, API server) without modification
+- **Responsiveness**: Progress updates never block download operations
+
+The `Arc` clones are cheap (just incrementing a reference count), and atomic operations use `Ordering::Relaxed` for progress (performance) and `Ordering::SeqCst` for interrupts (correctness).
 
 ## Key Learnings and Design Decisions
 
@@ -103,3 +111,11 @@ Testing revealed a 3x performance difference between debug and release builds:
 - Release build: ~8-10% CPU usage per core
 
 Most CPU time goes to SHA256 hashing (CPU-intensive crypto), not I/O operations. This reinforced the importance of testing with `--release` for realistic performance measurements, especially for compute-heavy operations like cryptographic hashing.
+
+### 9. Atomic Ordering Semantics
+
+When using atomics for lock-free communication, memory ordering matters:
+- **`Ordering::Relaxed`**: Used for progress counters (bytes downloaded, total bytes). These are "best effort" reads where slight delays or reorderings don't affect correctness. Progress bars showing slightly stale data is acceptable.
+- **`Ordering::SeqCst`**: Used for interrupt flag. This ensures all threads see the same global order of operations. When Ctrl-C is pressed, we need immediate, consistent visibility across the progress reporter task and download loop.
+
+The performance difference is negligible here (progress updates are already throttled to 500ms), but understanding the semantics clarifies intent: relaxed for metrics, sequential consistency for control flow.
