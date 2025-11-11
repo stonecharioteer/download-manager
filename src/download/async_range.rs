@@ -6,13 +6,14 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use url::Url;
 
+use crate::download::progress::DownloadProgress;
+
 pub async fn download_range_async(
     url: Url,
     target_dir: &Path,
     start: usize,
     end: usize,
-    bar: ProgressBar,
-    interrupted: Arc<AtomicBool>,
+    bar: DownloadProgress,
 ) -> anyhow::Result<PathBuf> {
     unimplemented!()
 }

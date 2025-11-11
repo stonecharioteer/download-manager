@@ -1,13 +1,10 @@
+use crate::download::progress::DownloadProgress;
 use crate::download::utils;
 use crate::download::{download_file_async, download_file_blocking, download_range_async};
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 use std::time::Duration;
 use url::Url;
 
@@ -75,16 +72,61 @@ impl Commands {
         resume: bool,
         overwrite: bool,
     ) -> anyhow::Result<()> {
+        use std::sync::atomic::Ordering;
         fs::create_dir_all(target_directory)?;
+
+        // Print initial info
+        println!("Downloading {} to {}", url, target_directory.display());
+        if resume {
+            println!("Resume mode enabled");
+        }
+        if overwrite {
+            println!("Overwrite mode enabled");
+        }
+
         let bar = indicatif::ProgressBar::new_spinner();
         bar.enable_steady_tick(Duration::from_millis(100));
-        bar.set_message(format!("Attempting to download {}", url));
-        let interrupted = Arc::new(AtomicBool::new(false));
-        let interrupted_clone = interrupted.clone();
+        bar.set_message("Starting download...");
+        let progress = DownloadProgress::new();
+        let download_start = std::time::Instant::now();
+        let interrupted_clone = progress.interrupted.clone();
         ctrlc::set_handler(move || {
             interrupted_clone.store(true, Ordering::SeqCst);
         })
         .expect("Could not set keyboard interrupt handler.");
+        let progress_clone = progress.clone();
+        let bar_clone = bar.clone();
+        let start_time = std::time::Instant::now();
+        let progress_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            loop {
+                interval.tick().await;
+                let downloaded = progress_clone.bytes_downloaded.load(Ordering::Relaxed);
+                let total = progress_clone.total_bytes.load(Ordering::Relaxed);
+                let elapsed = start_time.elapsed().as_secs().max(1);
+                let speed = downloaded as u64 / elapsed;
+
+                if total > 0 {
+                    bar_clone.set_message(format!(
+                        "Downloaded: {}/{} @ {}/s",
+                        indicatif::HumanBytes(downloaded as u64),
+                        indicatif::HumanBytes(total),
+                        indicatif::HumanBytes(speed)
+                    ));
+                } else {
+                    bar_clone.set_message(format!(
+                        "Downloaded: {} @ {}/s",
+                        indicatif::HumanBytes(downloaded as u64),
+                        indicatif::HumanBytes(speed)
+                    ));
+                }
+
+                if progress_clone.interrupted.load(Ordering::Relaxed) {
+                    bar_clone.abandon_with_message("Download interrupted.");
+                    break;
+                }
+            }
+        });
         match &self {
             Commands::DownloadBlocking => {
                 let target_directory = target_directory.clone();
@@ -96,15 +138,18 @@ impl Commands {
                         chunk_size,
                         resume,
                         overwrite,
-                        bar,
-                        interrupted,
+                        progress,
                     )?;
+                    let download_time = download_start.elapsed();
+                    progress_task.abort();
+                    bar.finish_with_message("Download complete");
                     let hash = utils::hash_file(&path, chunk_size)?;
                     println!(
-                        "File downloaded to {}; SHA256: {}.",
+                        "Downloaded to {} in {}",
                         path.display(),
-                        hex::encode(hash)
+                        indicatif::HumanDuration(download_time)
                     );
+                    println!("SHA256: {}", hex::encode(hash));
                     Ok(())
                 })
                 .await?
@@ -114,34 +159,39 @@ impl Commands {
                 range_end,
             } => match (range_start, range_end) {
                 (None, None) => {
-                    let path = download_file_async(
-                        url,
-                        target_directory,
-                        resume,
-                        overwrite,
-                        bar,
-                        interrupted,
-                    )
-                    .await?;
+                    let path =
+                        download_file_async(url, target_directory, resume, overwrite, progress)
+                            .await?;
+                    let download_time = download_start.elapsed();
+                    progress_task.abort();
+                    bar.finish_with_message("Download complete");
                     let hash = utils::hash_file(&path, chunk_size)?;
                     println!(
-                        "File downloaded to {}; SHA256: {}.",
+                        "Downloaded to {} in {}",
                         path.display(),
-                        hex::encode(hash)
+                        indicatif::HumanDuration(download_time)
                     );
+                    println!("SHA256: {}", hex::encode(hash));
                     Ok(())
                 }
                 (Some(start), Some(end)) => {
                     let path =
-                        download_range_async(url, target_directory, *start, *end, bar, interrupted)
-                            .await?;
-                    println!("File downloaded to {}.", path.display());
+                        download_range_async(url, target_directory, *start, *end, progress).await?;
+                    let download_time = download_start.elapsed();
+                    progress_task.abort();
+                    bar.finish_with_message("Range download complete");
+                    println!(
+                        "Downloaded range to {} in {}",
+                        path.display(),
+                        indicatif::HumanDuration(download_time)
+                    );
                     Ok(())
                 }
                 _ => {
-                    bail!(
-                        "Both --range-start and --range-end are required. You cannot pass only one.",
-                    );
+                    progress_task.abort();
+                    let message = "Both --range-start and --range-end are required. You cannot pass only one.";
+                    bar.abandon_with_message(message);
+                    bail!(message);
                 }
             },
         }

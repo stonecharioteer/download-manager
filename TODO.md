@@ -160,26 +160,28 @@
   - [x] Simplified hashing approach (compute after download, not streaming)
   - [ ] File opening logic (resume/overwrite/create) - deferred
   - [ ] Progress message formatting - deferred
-- [ ] Decouple progress/interrupt from download functions:
-  - [ ] Use `Arc<AtomicUsize>` for progress tracking
-  - [ ] Spawn separate task in `execute()` for progress updates
-  - [ ] Download functions only update atomics, no bar logic
-  - [ ] Interrupt checking via atomic flag only
+- [x] Decouple progress/interrupt from download functions:
+  - [x] Use `Arc<AtomicUsize>` for progress tracking (`DownloadProgress` struct)
+  - [x] Spawn separate task in `execute()` for progress updates
+  - [x] Download functions only update atomics, no bar logic
+  - [x] Interrupt checking via atomic flag only
+  - [x] Progress reporter shows speed and bytes downloaded
 - [x] Download functions return `PathBuf` instead of `()`
 - [x] CLI handles hashing and printing, not download functions
+- [x] Streamline stdout: consistent messages across blocking/async
+- [x] Show total download time (excluding hash time)
 
 **Google/Read Topics:**
 - [x] "Rust module system mod.rs vs file.rs"
 - [x] "Rust pub use re-exports"
 - [x] "structuring larger Rust projects"
-- [ ] "tokio mpsc channel progress reporting"
-- [ ] "Arc AtomicUsize for progress tracking"
+- [x] "Arc AtomicUsize for progress tracking"
 
 **Self-Check:**
 - [x] Each module has single clear responsibility?
 - [x] No circular dependencies between modules?
 - [x] Public API surface is minimal and clear?
-- [ ] Download functions have no UI concerns? (still have progress bar/interrupt logic)
+- [x] Download functions have no UI concerns?
 
 ---
 

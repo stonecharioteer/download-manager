@@ -1,11 +1,10 @@
 use anyhow::bail;
-use indicatif::{HumanBytes, HumanDuration};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, atomic::AtomicBool};
 use tokio::time::Instant;
 use url::Url;
 
+use crate::download::progress::DownloadProgress;
 use crate::download::utils;
 
 pub async fn download_file_async(
@@ -13,8 +12,7 @@ pub async fn download_file_async(
     target_dir: &PathBuf,
     resume: bool,
     overwrite: bool,
-    bar: indicatif::ProgressBar,
-    interrupted: Arc<AtomicBool>,
+    progress: DownloadProgress,
 ) -> anyhow::Result<PathBuf> {
     use futures::StreamExt;
     use tokio::fs::OpenOptions;
@@ -66,9 +64,12 @@ pub async fn download_file_async(
     } else {
         reqwest::get(url).await?.error_for_status()?
     };
+    let content_length = response.content_length();
+    progress
+        .total_bytes
+        .store(content_length.unwrap_or(0), Ordering::Relaxed);
 
     let mut stream = response.bytes_stream();
-    let mut progress_interval = interval(Duration::from_secs(1));
     let mut interrupt_interval = interval(Duration::from_millis(500));
     loop {
         tokio::select! {
@@ -78,32 +79,26 @@ pub async fn download_file_async(
                     let chunk = chunk_result?;
                     dest.write_all(&chunk).await?;
                     downloaded += chunk.len();
+                    progress.bytes_downloaded.store(downloaded, Ordering::Relaxed);
 
                 }
                 None => break,
             }
             }
             _ = interrupt_interval.tick() => {
-                if interrupted.load(Ordering::SeqCst) {
-                    let err_message = "Download interrupted.";
-                    bar.abandon_with_message(err_message);
-                    bail!(err_message);
+                if progress.interrupted.load(Ordering::SeqCst) {
+                    bail!("Download interrupted.");
                 }
-            }
-            _ = progress_interval.tick() => {
-                let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
-                let message = format!("Downloaded: {}, speed: {}/s. Time Elapsed: {}.", HumanBytes(downloaded as u64), HumanBytes(speed), HumanDuration(start_time.elapsed()));
-                bar.set_message(message);
             }
             else => break,
         }
     }
     let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
-    bar.finish_with_message(format!(
+    println!(
         "Downloaded: {}, speed: {}/s. Total Time: {}.",
-        HumanBytes(downloaded as u64),
-        HumanBytes(speed),
-        HumanDuration(start_time.elapsed())
-    ));
+        indicatif::HumanBytes(downloaded as u64),
+        indicatif::HumanBytes(speed),
+        indicatif::HumanDuration(start_time.elapsed())
+    );
     Ok(fname)
 }

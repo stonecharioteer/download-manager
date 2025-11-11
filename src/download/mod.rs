@@ -1,6 +1,7 @@
 mod async_download;
 mod async_range;
 mod blocking;
+pub mod progress;
 pub mod utils;
 
 pub use async_download::download_file_async;
