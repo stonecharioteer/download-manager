@@ -1,5 +1,4 @@
-use anyhow::Result;
-use anyhow::anyhow;
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use hex;
 use indicatif::{HumanBytes, HumanDuration, ProgressBar};
@@ -44,7 +43,15 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     DownloadBlocking,
-    DownloadAsync,
+    DownloadAsync {
+        /// Downloads from this byte
+        #[arg(short = 's', long)]
+        range_start: Option<usize>,
+
+        /// Downloads till this byte
+        #[arg(short = 'e', long)]
+        range_end: Option<usize>,
+    },
 }
 
 fn download_file_blocking(
@@ -89,7 +96,7 @@ fn download_file_blocking(
             OpenOptions::new().read(true).append(true).open(&fname)?
         } else {
             let message = format!("File exists at: '{}'", fname.to_str().unwrap());
-            return Err(anyhow!(message));
+            bail!(message);
         }
     } else {
         // File doesn't exist yet.
@@ -117,14 +124,14 @@ fn download_file_blocking(
             416 => {
                 // Range not satisfiable, file is likely complete.
                 println!("File appears to be complete.");
-                return Err(anyhow!("File already complete"));
+                bail!("File already complete");
             }
             200 => {
                 eprintln!("Server doesn't support resume for this file. Try `--overwrite`");
-                return Err(anyhow!("Cannot resume - server sent full file."));
+                bail!("Cannot resume - server sent full file.");
             }
             _ => {
-                return Err(anyhow!("Unexpected status: {}", resp.status()));
+                bail!("Unexpected status: {}", resp.status());
             }
         }
     } else {
@@ -180,7 +187,7 @@ fn download_file_blocking(
             )),
         }
         eprintln!("Download cancelled!");
-        return Err(anyhow!("Download cancelled by user."));
+        bail!("Download cancelled by user.");
     }
     let speed = (downloaded - resume_from) as u64 / start_time.elapsed().as_secs().max(1);
     bar.finish_with_message(format!(
@@ -198,6 +205,17 @@ fn download_file_blocking(
 }
 
 #[allow(unused)]
+async fn download_range_async(
+    url: String,
+    target_dir: &Path,
+    start: usize,
+    end: usize,
+    bar: ProgressBar,
+    interrupted: Arc<AtomicBool>,
+) -> Result<()> {
+    unimplemented!()
+}
+
 async fn download_file_async(
     url: String,
     target_dir: &Path,
@@ -208,7 +226,7 @@ async fn download_file_async(
     interrupted: Arc<AtomicBool>,
 ) -> Result<()> {
     use futures::StreamExt;
-    use tokio::fs::{File, OpenOptions};
+    use tokio::fs::OpenOptions;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tokio::time::{Duration, interval};
@@ -241,7 +259,7 @@ async fn download_file_async(
             }
             OpenOptions::new().append(true).open(&fname).await?
         } else {
-            return Err(anyhow!("File exists"));
+            bail!("File exists");
         }
     } else {
         OpenOptions::new()
@@ -260,12 +278,12 @@ async fn download_file_async(
             .await?;
         match resp.status().as_u16() {
             206 => resp,
-            416 => return Err(anyhow!("File already complete")),
+            416 => bail!("File already complete"),
             200 => {
                 eprintln!("Server doesn't support resume. Try --overwrite");
-                return Err(anyhow!("Cannot resume."));
+                bail!("Cannot resume.");
             }
-            _ => return Err(anyhow!("Unexpected status: {}", resp.status())),
+            _ => bail!("Unexpected status: {}", resp.status()),
         }
     } else {
         reqwest::get(&url).await?.error_for_status()?
@@ -292,7 +310,7 @@ async fn download_file_async(
                 if interrupted.load(Ordering::SeqCst) {
                     let err_message = "Download interrupted.";
                     bar.abandon_with_message(err_message);
-                    return Err(anyhow!(err_message));
+                    bail!(err_message);
                 }
             }
             _ = progress_interval.tick() => {
@@ -331,18 +349,29 @@ async fn main() -> Result<()> {
     })
     .expect("Could not set keyboard interrupt handler.");
     match cli.command {
-        Commands::DownloadAsync => {
-            download_file_async(
-                url,
-                target_dir,
-                cli.chunk_size,
-                cli.resume,
-                cli.overwrite,
-                bar,
-                interrupted,
-            )
-            .await
-        }
+        Commands::DownloadAsync {
+            range_start,
+            range_end,
+        } => match (range_start, range_end) {
+            (None, None) => {
+                download_file_async(
+                    url,
+                    target_dir,
+                    cli.chunk_size,
+                    cli.resume,
+                    cli.overwrite,
+                    bar,
+                    interrupted,
+                )
+                .await
+            }
+            (Some(start), Some(end)) => {
+                download_range_async(url, target_dir, start, end, bar, interrupted).await
+            }
+            _ => {
+                bail!("Both --range-start and --range-end are required. You cannot pass only one.",);
+            }
+        },
         Commands::DownloadBlocking => {
             let target_dir = cli.target_directory.clone();
             tokio::task::spawn_blocking(move || {
