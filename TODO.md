@@ -43,42 +43,75 @@
 ### Task 3 — Ranged + chunked download skeleton
 
 **Build Requirements:**
-- [ ] Accept a `--range-start` flag
-- [ ] Accept a `--range-end` flag
+- [x] Accept a `--range-start` flag
+- [x] Accept a `--range-end` flag
 - [x] Use `Range` header in request
-- [ ] Download only that part of the file to a temp file
+- [ ] Download only that part of the file to a temp file (`part.{start}-{end}`)
+- [ ] Fix implementation issues in `async_range.rs`:
+  - [ ] Fix path construction (use `target_dir.join()` directly)
+  - [ ] Move content_length check after status validation
+  - [ ] Add progress atomic updates
+  - [ ] Add interrupt handling with interval
+  - [ ] Remove unused imports and variables
+- [ ] Design unified progress tracking system (extends indicatif):
+  - [ ] Create `ChunkProgressBar` wrapper that extends indicatif::ProgressBar
+  - [ ] Track chunk states: pending, downloading, completed, failed
+  - [ ] Generate custom messages/formats for indicatif to render
+  - [ ] Adaptive progress display modes:
+    - [ ] **Multi-chunk mode**: Visual bar with color-coded chunks (for concurrent downloads)
+      - Green `█` = completed
+      - Yellow/Cyan `█` = actively downloading (different colors for different workers)
+      - Gray `░` = pending
+      - Red `█` = failed
+      - Example: `[████░░██░░] 45% @ 5.2 MB/s`
+    - [ ] **Single-chunk mode**: Regular progress bar with percentage (for single-file downloads with known size)
+    - [ ] **Unknown-size mode**: Spinner fallback (when Content-Length unavailable)
+  - [ ] Works for blocking, async, and range downloads
+  - [ ] Single chunk = regular download (one chunk spanning 0-EOF)
+  - [ ] Wraps indicatif::ProgressBar, uses `set_message()` with custom formatting
+  - [ ] Use colored crate for ANSI color codes in messages
 
 **Google/Read Topics:**
 - [x] "reqwest set header Range bytes example"
 - [x] "HTTP Range header format"
 - [x] "fs::OpenOptions append/truncate mode"
+- [ ] "indicatif custom progress bar rendering"
+- [ ] "Rust enum for state machine (chunk states)"
+- [ ] "colored crate Rust terminal colors"
+- [ ] "ANSI escape codes terminal colors"
 
 **Self-Check:**
 - [x] Does server return `206 Partial Content`?
 - [ ] Is downloaded chunk size correct?
 - [ ] Can multiple non-overlapping ranges be stitched together with `cat`?
+- [ ] Does chunk progress bar show visual status of all ranges?
 
 ---
 
 ### Task 4 — Concurrent chunk workers
 
 **Build Requirements:**
-- [ ] Add `--workers N` flag
-- [ ] Split file into N equal ranges
-- [ ] Spawn N `tokio::spawn` tasks for concurrent downloads
-- [ ] Each worker downloads to distinct temp file (`part.0`, `part.1`, etc.)
-- [ ] Use `futures::future::join_all` to wait for all workers
-- [ ] Each worker computes SHA256 for its chunk (for verification)
+- [x] Add `--workers N` flag
+- [x] Split file into N equal ranges
+- [x] Spawn N `tokio::spawn` tasks for concurrent downloads
+- [x] Each worker downloads to distinct temp file (`filename.part.start-end`)
+- [x] Use `futures::future::join_all` to wait for all workers
+- [x] Merge parts in correct order after all complete
+- [x] SHA256 verification of merged file
+- [x] Add `--no-cleanup` flag for debugging (keeps part files)
+- [x] Use GET request to get Content-Length (HEAD doesn't always return it)
 
 **Google/Read Topics:**
 - [x] "reqwest Range header partial content example"
-- [ ] "tokio::spawn examples"
-- [ ] "futures::future::join_all usage"
+- [x] "tokio::spawn examples"
+- [x] "futures::future::join_all usage"
 
 **Self-Check:**
-- [ ] Do all parts complete with expected byte lengths?
-- [ ] Does total time improve vs single-worker?
-- [ ] No file write clashes (each worker uses own part file)?
+- [x] Do all parts complete with expected byte lengths?
+- [x] Does total time improve vs single-worker?
+- [x] No file write clashes (each worker uses own part file)?
+- [x] Parts merged in correct order?
+- [x] Final file SHA256 matches reference download?
 
 ---
 

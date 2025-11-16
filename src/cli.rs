@@ -1,7 +1,6 @@
 use crate::download::progress::DownloadProgress;
 use crate::download::utils;
-use crate::download::{download_file_async, download_file_blocking, download_range_async};
-use anyhow::bail;
+use crate::download::{download_file_async, download_file_blocking, download_with_workers};
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
@@ -33,6 +32,10 @@ pub struct Cli {
     /// Overwrite existing file
     #[arg(short, long)]
     overwrite: bool,
+
+    /// Don't cleanup part files after merging (for debugging)
+    #[arg(long)]
+    no_cleanup: bool,
 }
 
 impl Cli {
@@ -44,6 +47,7 @@ impl Cli {
                 self.chunk_size,
                 self.resume,
                 self.overwrite,
+                self.no_cleanup,
             )
             .await
     }
@@ -53,13 +57,9 @@ impl Cli {
 pub enum Commands {
     DownloadBlocking,
     DownloadAsync {
-        /// Downloads from this byte
-        #[arg(short = 's', long)]
-        range_start: Option<usize>,
-
-        /// Downloads till this byte
-        #[arg(short = 'e', long)]
-        range_end: Option<usize>,
+        /// Use workers to download, by default this is 1, for single-worker driven.
+        #[arg(short, long, default_value_t = 1)]
+        workers: u8,
     },
 }
 
@@ -71,6 +71,7 @@ impl Commands {
         chunk_size: usize,
         resume: bool,
         overwrite: bool,
+        no_cleanup: bool,
     ) -> anyhow::Result<()> {
         use std::sync::atomic::Ordering;
         fs::create_dir_all(target_directory)?;
@@ -142,7 +143,7 @@ impl Commands {
                     )?;
                     let download_time = download_start.elapsed();
                     progress_task.abort();
-                    bar.finish_with_message("Download complete");
+                    bar.finish_with_message("Download complete, hashing now.");
                     let hash = utils::hash_file(&path, chunk_size)?;
                     println!(
                         "Downloaded to {} in {}",
@@ -154,17 +155,34 @@ impl Commands {
                 })
                 .await?
             }
-            Commands::DownloadAsync {
-                range_start,
-                range_end,
-            } => match (range_start, range_end) {
-                (None, None) => {
+            Commands::DownloadAsync { workers } => {
+                if *workers <= 1 {
                     let path =
                         download_file_async(url, target_directory, resume, overwrite, progress)
                             .await?;
                     let download_time = download_start.elapsed();
                     progress_task.abort();
-                    bar.finish_with_message("Download complete");
+                    bar.finish_with_message("Download complete, hashing now.");
+                    let hash = utils::hash_file(&path, chunk_size)?;
+                    println!(
+                        "Downloaded to {} in {}",
+                        path.display(),
+                        indicatif::HumanDuration(download_time)
+                    );
+                    println!("SHA256: {}", hex::encode(hash));
+                    Ok(())
+                } else {
+                    let path = download_with_workers(
+                        url,
+                        target_directory,
+                        *workers,
+                        progress,
+                        no_cleanup,
+                    )
+                    .await?;
+                    let download_time = download_start.elapsed();
+                    progress_task.abort();
+                    bar.finish_with_message("Download complete, hashing now.");
                     let hash = utils::hash_file(&path, chunk_size)?;
                     println!(
                         "Downloaded to {} in {}",
@@ -174,26 +192,7 @@ impl Commands {
                     println!("SHA256: {}", hex::encode(hash));
                     Ok(())
                 }
-                (Some(start), Some(end)) => {
-                    let path =
-                        download_range_async(url, target_directory, *start, *end, progress).await?;
-                    let download_time = download_start.elapsed();
-                    progress_task.abort();
-                    bar.finish_with_message("Range download complete");
-                    println!(
-                        "Downloaded range to {} in {}",
-                        path.display(),
-                        indicatif::HumanDuration(download_time)
-                    );
-                    Ok(())
-                }
-                _ => {
-                    progress_task.abort();
-                    let message = "Both --range-start and --range-end are required. You cannot pass only one.";
-                    bar.abandon_with_message(message);
-                    bail!(message);
-                }
-            },
+            }
         }
     }
 }
