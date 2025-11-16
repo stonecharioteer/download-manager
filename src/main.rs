@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use clap::Parser;
 mod cli;
 mod download;
