@@ -46,45 +46,38 @@
 - [x] Accept a `--range-start` flag
 - [x] Accept a `--range-end` flag
 - [x] Use `Range` header in request
-- [ ] Download only that part of the file to a temp file (`part.{start}-{end}`)
-- [ ] Fix implementation issues in `async_range.rs`:
-  - [ ] Fix path construction (use `target_dir.join()` directly)
-  - [ ] Move content_length check after status validation
-  - [ ] Add progress atomic updates
-  - [ ] Add interrupt handling with interval
-  - [ ] Remove unused imports and variables
-- [ ] Design unified progress tracking system (extends indicatif):
-  - [ ] Create `ChunkProgressBar` wrapper that extends indicatif::ProgressBar
-  - [ ] Track chunk states: pending, downloading, completed, failed
-  - [ ] Generate custom messages/formats for indicatif to render
-  - [ ] Adaptive progress display modes:
-    - [ ] **Multi-chunk mode**: Visual bar with color-coded chunks (for concurrent downloads)
+- [x] Download only that part of the file to a temp file (`part.{start}-{end}`)
+- [x] Fix implementation issues in `async_range.rs`
+- [x] Design unified progress tracking system (extends indicatif):
+  - [x] Create `ChunkProgressBar` wrapper that extends indicatif::ProgressBar
+  - [x] Track chunk states: pending, downloading, completed, failed
+  - [x] Generate custom messages/formats for indicatif to render
+  - [x] Adaptive progress display modes:
+    - [x] **Multi-chunk mode**: Visual bar with color-coded chunks (for concurrent downloads)
       - Green `█` = completed
-      - Yellow/Cyan `█` = actively downloading (different colors for different workers)
+      - Yellow/Cyan/Magenta `█` = actively downloading (different colors for different workers)
       - Gray `░` = pending
       - Red `█` = failed
       - Example: `[████░░██░░] 45% @ 5.2 MB/s`
-    - [ ] **Single-chunk mode**: Regular progress bar with percentage (for single-file downloads with known size)
-    - [ ] **Unknown-size mode**: Spinner fallback (when Content-Length unavailable)
-  - [ ] Works for blocking, async, and range downloads
-  - [ ] Single chunk = regular download (one chunk spanning 0-EOF)
-  - [ ] Wraps indicatif::ProgressBar, uses `set_message()` with custom formatting
-  - [ ] Use colored crate for ANSI color codes in messages
+    - [x] **Single-chunk mode**: Regular spinner (for single-worker downloads)
+  - [x] Works for blocking, async, and range downloads
+  - [x] Wraps indicatif::ProgressBar, uses `set_message()` with custom formatting
+  - [x] Use colored crate for ANSI color codes in messages
 
 **Google/Read Topics:**
 - [x] "reqwest set header Range bytes example"
 - [x] "HTTP Range header format"
 - [x] "fs::OpenOptions append/truncate mode"
-- [ ] "indicatif custom progress bar rendering"
-- [ ] "Rust enum for state machine (chunk states)"
-- [ ] "colored crate Rust terminal colors"
-- [ ] "ANSI escape codes terminal colors"
+- [x] "indicatif custom progress bar rendering"
+- [x] "Rust enum for state machine (chunk states)"
+- [x] "colored crate Rust terminal colors"
+- [x] "ANSI escape codes terminal colors"
 
 **Self-Check:**
 - [x] Does server return `206 Partial Content`?
-- [ ] Is downloaded chunk size correct?
-- [ ] Can multiple non-overlapping ranges be stitched together with `cat`?
-- [ ] Does chunk progress bar show visual status of all ranges?
+- [x] Is downloaded chunk size correct?
+- [x] Can multiple non-overlapping ranges be stitched together?
+- [x] Does chunk progress bar show visual status of all ranges?
 
 ---
 
@@ -118,63 +111,83 @@
 ### Task 5 — Shared progress aggregation
 
 **Build Requirements:**
-- [ ] Add `Arc<tokio::sync::Mutex<Progress>>` for shared progress
-- [ ] Workers update shared state as they write bytes
-- [ ] Progress task reads state every 200-500ms
-- [ ] Display aggregated percent, bytes/sec, ETA
+- [x] Add shared progress tracking (`ChunkProgressBar` with atomics)
+- [x] Workers update shared state as they write bytes
+- [x] Progress task reads state every 100ms
+- [x] Display aggregated bytes/sec and progress visualization
+- [x] Implement `ProgressTracker` trait for abstraction
+- [x] Create `get_content_length()` helper for clean separation
 
 **Google/Read Topics:**
-- [ ] "Arc tokio::sync::Mutex pattern"
-- [ ] "std::sync::atomic AtomicU64 example"
-- [ ] "how to compute moving bytes/sec for progress bar"
+- [x] "Arc tokio::sync::Mutex pattern"
+- [x] "std::sync::atomic AtomicU64 example"
+- [x] "how to compute moving bytes/sec for progress bar"
 
 **Self-Check:**
-- [ ] Aggregated progress equals sum of per-part bytes?
-- [ ] Progress reporter never blocks workers?
-- [ ] ETA/bytes-per-sec updates smoothly?
+- [x] Aggregated progress equals sum of per-part bytes?
+- [x] Progress reporter never blocks workers?
+- [x] Bytes-per-sec updates smoothly?
 
 ---
 
 ### Task 6 — Pause + resume with state persistence
 
 **Build Requirements:**
-- [ ] Handle SIGINT to write JSON state file
-- [ ] State file lists: total size, worker ranges, bytes per part, per-chunk SHA256
-- [ ] Resume: read state, download remaining bytes, append to parts
-- [ ] Resume: continue SHA256 calculation from pause point
-- [ ] Verify final concatenation yields correct file
+- [ ] Create `DownloadState` struct with `serde` derives for state persistence
+  - Fields: url, total_bytes, num_workers, chunk_ranges (with ChunkRange struct)
+  - ChunkRange: id, start, end, status (Pending/Completed/Failed), bytes_downloaded
+- [ ] Implement progress file writing on worker completion
+  - Update state file atomically each time a chunk completes
+  - Use atomic file write pattern (write to temp → rename)
+- [ ] Add progress file naming based on URL hash
+  - Format: `.dlm-progress-<url-hash>.json` in target directory
+  - Multiple downloads can coexist with different state files
+- [ ] Implement two-stage Ctrl-C handling
+  - First Ctrl-C: Set pause flag, workers exit gracefully, keep state file
+  - Second Ctrl-C: Clean exit (state already saved)
+  - Print "Download paused. Run with --resume to continue."
+- [ ] Implement resume logic
+  - Check for existing progress file on startup with `--resume`
+  - Read state from JSON
+  - Calculate which chunks are incomplete
+  - Spawn workers only for incomplete chunks
+  - Continue updating progress file as new chunks complete
+- [ ] Test pause and resume with multi-worker downloads
+  - Pause mid-download, verify state file accuracy
+  - Resume and verify only incomplete chunks are downloaded
+  - Final file SHA256 matches expected hash
 
 **Google/Read Topics:**
 - [ ] "serde_json write/read file example"
 - [x] "signal handling tokio ctrlc or signal-hook"
-- [ ] "atomic rename write temp file"
+- [ ] "atomic rename write temp file (durable writes)"
+- [ ] "SHA256 hash URL for unique filename"
 
 **Self-Check:**
 - [ ] State file is truthful snapshot of progress?
-- [ ] Resume fetches only remaining bytes?
-- [ ] SHA256 calculation resumes correctly for partial chunks?
-- [ ] Final file has correct size and checksum?
+- [ ] Resume fetches only remaining bytes for incomplete chunks?
+- [ ] Progress file updated atomically without corruption?
+- [ ] Final file has correct size and checksum after pause/resume?
+- [ ] Can pause and resume multiple times?
 
 ---
 
 ### Task 7 — Merge and verify parts
 
 **Build Requirements:**
-- [ ] Merge chunk files in order into single file
-- [ ] Compute overall SHA256: combine per-chunk hashes OR hash merged file
-- [ ] Optionally verify against known checksum
-- [ ] Remove temporary part files after merge
+- [x] Merge chunk files in order into single file
+- [x] Compute overall SHA256 after merge (hashing merged file)
+- [x] Remove temporary part files after merge (with `--no-cleanup` flag for debugging)
 
 **Google/Read Topics:**
-- [ ] "Rust concatenate multiple files to one"
-- [ ] "std::fs::File seek and write_all example"
+- [x] "Rust concatenate multiple files to one"
+- [x] "std::fs::File seek and write_all example"
 - [x] "sha2 crate example for file hashing"
-- [ ] "SHA256 combining partial hashes" (note: may need to hash merged file instead)
 
 **Self-Check:**
-- [ ] Merged file size equals total Content-Length?
-- [ ] SHA256 checksum matches expected (verified against known hash)?
-- [ ] Temp part files safely removed?
+- [x] Merged file size equals total Content-Length?
+- [x] SHA256 checksum computed correctly?
+- [x] Temp part files safely removed (or kept with --no-cleanup)?
 
 ---
 
