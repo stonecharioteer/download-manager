@@ -1,9 +1,13 @@
-use crate::download::progress::DownloadProgress;
+use crate::download::progress::{ChunkProgressBar, DownloadProgress, ProgressTracker};
 use crate::download::utils;
-use crate::download::{download_file_async, download_file_blocking, download_with_workers};
+use crate::download::{
+    download_file_async, download_file_blocking, download_with_workers, get_content_length,
+};
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use url::Url;
 
@@ -85,114 +89,162 @@ impl Commands {
             println!("Overwrite mode enabled");
         }
 
-        let bar = indicatif::ProgressBar::new_spinner();
-        bar.enable_steady_tick(Duration::from_millis(100));
-        bar.set_message("Starting download...");
-        let progress = DownloadProgress::new();
-        let download_start = std::time::Instant::now();
-        let interrupted_clone = progress.interrupted.clone();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let interrupted_clone = interrupted.clone();
         ctrlc::set_handler(move || {
             interrupted_clone.store(true, Ordering::SeqCst);
         })
         .expect("Could not set keyboard interrupt handler.");
-        let progress_clone = progress.clone();
-        let bar_clone = bar.clone();
+
+        let download_start = std::time::Instant::now();
         let start_time = std::time::Instant::now();
-        let progress_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_millis(500));
-            loop {
-                interval.tick().await;
-                let downloaded = progress_clone.bytes_downloaded.load(Ordering::Relaxed);
-                let total = progress_clone.total_bytes.load(Ordering::Relaxed);
-                let elapsed = start_time.elapsed().as_secs().max(1);
-                let speed = downloaded as u64 / elapsed;
 
-                if total > 0 {
-                    bar_clone.set_message(format!(
-                        "Downloaded: {}/{} @ {}/s",
-                        indicatif::HumanBytes(downloaded as u64),
-                        indicatif::HumanBytes(total),
-                        indicatif::HumanBytes(speed)
-                    ));
-                } else {
-                    bar_clone.set_message(format!(
-                        "Downloaded: {} @ {}/s",
-                        indicatif::HumanBytes(downloaded as u64),
-                        indicatif::HumanBytes(speed)
-                    ));
-                }
-
-                if progress_clone.interrupted.load(Ordering::Relaxed) {
-                    bar_clone.abandon_with_message("Download interrupted.");
-                    break;
-                }
-            }
-        });
-        match &self {
+        let path = match &self {
             Commands::DownloadBlocking => {
-                let target_directory = target_directory.clone();
-                let url = url.clone();
-                tokio::task::spawn_blocking(move || {
-                    let path = download_file_blocking(
-                        url,
-                        &target_directory,
-                        chunk_size,
-                        resume,
-                        overwrite,
-                        progress,
-                    )?;
-                    let download_time = download_start.elapsed();
-                    progress_task.abort();
-                    bar.finish_with_message("Download complete, hashing now.");
-                    let hash = utils::hash_file(&path, chunk_size)?;
-                    println!(
-                        "Downloaded to {} in {}",
-                        path.display(),
-                        indicatif::HumanDuration(download_time)
-                    );
-                    println!("SHA256: {}", hex::encode(hash));
-                    Ok(())
-                })
+                self.download_blocking(
+                    url,
+                    target_directory,
+                    chunk_size,
+                    resume,
+                    overwrite,
+                    interrupted,
+                    download_start,
+                    start_time,
+                )
+                .await?
+            }
+            Commands::DownloadAsync { workers } if *workers <= 1 => {
+                self.download_async_single(
+                    url,
+                    target_directory,
+                    chunk_size,
+                    resume,
+                    overwrite,
+                    interrupted,
+                    download_start,
+                    start_time,
+                )
                 .await?
             }
             Commands::DownloadAsync { workers } => {
-                if *workers <= 1 {
-                    let path =
-                        download_file_async(url, target_directory, resume, overwrite, progress)
-                            .await?;
-                    let download_time = download_start.elapsed();
-                    progress_task.abort();
-                    bar.finish_with_message("Download complete, hashing now.");
-                    let hash = utils::hash_file(&path, chunk_size)?;
-                    println!(
-                        "Downloaded to {} in {}",
-                        path.display(),
-                        indicatif::HumanDuration(download_time)
-                    );
-                    println!("SHA256: {}", hex::encode(hash));
-                    Ok(())
-                } else {
-                    let path = download_with_workers(
-                        url,
-                        target_directory,
-                        *workers,
-                        progress,
-                        no_cleanup,
-                    )
-                    .await?;
-                    let download_time = download_start.elapsed();
-                    progress_task.abort();
-                    bar.finish_with_message("Download complete, hashing now.");
-                    let hash = utils::hash_file(&path, chunk_size)?;
-                    println!(
-                        "Downloaded to {} in {}",
-                        path.display(),
-                        indicatif::HumanDuration(download_time)
-                    );
-                    println!("SHA256: {}", hex::encode(hash));
-                    Ok(())
-                }
+                self.download_async_multi(
+                    url,
+                    target_directory,
+                    chunk_size,
+                    *workers,
+                    interrupted,
+                    no_cleanup,
+                    download_start,
+                )
+                .await?
             }
-        }
+        };
+
+        // Common hashing logic
+        let hash = utils::hash_file(&path, chunk_size)?;
+        println!("Downloaded to: {}", path.display());
+        println!("SHA256: {}", hex::encode(hash));
+
+        Ok(())
+    }
+
+    async fn download_blocking(
+        &self,
+        url: Url,
+        target_directory: &PathBuf,
+        chunk_size: usize,
+        resume: bool,
+        overwrite: bool,
+        interrupted: Arc<AtomicBool>,
+        download_start: std::time::Instant,
+        start_time: std::time::Instant,
+    ) -> anyhow::Result<PathBuf> {
+        let progress = DownloadProgress::new(interrupted.clone());
+        let bar = indicatif::ProgressBar::new_spinner();
+        bar.enable_steady_tick(Duration::from_millis(100));
+        bar.set_message("Starting download...");
+
+        let target_directory = target_directory.clone();
+        let url = url.clone();
+        tokio::task::spawn_blocking(move || {
+            let path = download_file_blocking(
+                url,
+                &target_directory,
+                chunk_size,
+                resume,
+                overwrite,
+                progress,
+            )?;
+            let download_time = download_start.elapsed();
+            bar.finish_with_message(format!(
+                "Download complete in {}, calculating hash",
+                indicatif::HumanDuration(download_time)
+            ));
+            Ok(path)
+        })
+        .await?
+    }
+
+    async fn download_async_single(
+        &self,
+        url: Url,
+        target_directory: &PathBuf,
+        chunk_size: usize,
+        resume: bool,
+        overwrite: bool,
+        interrupted: Arc<AtomicBool>,
+        download_start: std::time::Instant,
+        start_time: std::time::Instant,
+    ) -> anyhow::Result<PathBuf> {
+        let progress = DownloadProgress::new(interrupted);
+        let path = download_file_async(url, target_directory, resume, overwrite, progress).await?;
+        let download_time = download_start.elapsed();
+        println!("Download complete in {}, calculating hash", indicatif::HumanDuration(download_time));
+        Ok(path)
+    }
+
+    async fn download_async_multi(
+        &self,
+        url: Url,
+        target_directory: &PathBuf,
+        chunk_size: usize,
+        workers: u8,
+        interrupted: Arc<AtomicBool>,
+        no_cleanup: bool,
+        download_start: std::time::Instant,
+    ) -> anyhow::Result<PathBuf> {
+        // Get content length first to create progress bar
+        let content_length = get_content_length(&url).await?;
+
+        // Create progress bar
+        let progress = ChunkProgressBar::new(workers as usize, content_length, interrupted.clone());
+
+        // Spawn a background task to render progress
+        let progress_clone = progress.clone();
+        let render_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(100));
+            loop {
+                interval.tick().await;
+                progress_clone.render();
+            }
+        });
+
+        // Download with workers
+        let path =
+            download_with_workers(url, target_directory, workers, progress.clone(), no_cleanup)
+                .await?;
+
+        // Stop the render task
+        render_task.abort();
+
+        let download_time = download_start.elapsed();
+
+        // Finish the progress bar
+        progress.finish(&format!(
+            "Download complete in {}, calculating hash",
+            indicatif::HumanDuration(download_time)
+        ));
+
+        Ok(path)
     }
 }

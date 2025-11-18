@@ -1,4 +1,4 @@
-use crate::download::progress::DownloadProgress;
+use crate::download::progress::{ChunkProgressBar, ChunkState};
 use crate::download::utils;
 use anyhow::bail;
 use futures::StreamExt;
@@ -10,23 +10,28 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::{Duration, interval};
 use url::Url;
 
+pub async fn get_content_length(url: &Url) -> anyhow::Result<u64> {
+    let response = reqwest::Client::new().get(url.as_str()).send().await?;
+
+    response.content_length().ok_or_else(|| {
+        anyhow::anyhow!("Content length not available")
+    })
+}
+
 pub async fn download_with_workers(
     url: Url,
     target_dir: &Path,
     workers: u8,
-    progress: DownloadProgress,
+    progress: ChunkProgressBar,
     no_cleanup: bool,
 ) -> anyhow::Result<PathBuf> {
-    let response = reqwest::Client::new().get(url.as_str()).send().await?;
-
-    let content_length = response.content_length().ok_or_else(|| {
-        anyhow::anyhow!("Content length not available, downloading with workers isn't possible.")
-    })?;
+    let content_length = get_content_length(&url).await?;
 
     let chunk_size = content_length / workers as u64;
     let mut chunks_array: Vec<(usize, usize)> = vec![];
 
     for i in 0..workers {
+        progress.set_chunk_state(i as usize, ChunkState::Pending);
         let start = i as u64 * chunk_size;
         let end = if i == workers - 1 {
             content_length - 1 // last chunk goes to end
@@ -37,13 +42,13 @@ pub async fn download_with_workers(
     }
 
     let mut tasks = Vec::new();
-    for (start, end) in chunks_array {
+    for (chunk_id, (start, end)) in chunks_array.into_iter().enumerate() {
         let url_clone = url.clone();
         let target_dir = target_dir.to_path_buf();
         let progress_clone = progress.clone();
 
         let task = tokio::spawn(async move {
-            download_range_async(url_clone, &target_dir, start, end, progress_clone).await
+            download_range_async(url_clone, &target_dir, start, end, chunk_id, progress_clone).await
         });
         tasks.push(task)
     }
@@ -93,7 +98,8 @@ async fn download_range_async(
     target_dir: &Path,
     start: usize,
     end: usize,
-    progress: DownloadProgress,
+    chunk_id: usize,
+    progress: ChunkProgressBar,
 ) -> anyhow::Result<PathBuf> {
     let _start_time = Instant::now();
     let fname = utils::build_download_path(&url, &target_dir);
@@ -109,7 +115,10 @@ async fn download_range_async(
         .open(&fname)
         .await?;
 
-    let mut _downloaded = 0;
+    let mut downloaded = 0;
+
+    // Mark this chunk as downloading
+    progress.set_chunk_state(chunk_id, ChunkState::Downloading { worker_id: chunk_id });
 
     let response = reqwest::Client::new()
         .get(url)
@@ -122,9 +131,13 @@ async fn download_range_async(
         200 => {
             let message = "Server doesn't support the `range` header, cannot download chunks.";
             eprintln!("{}", message);
+            progress.set_chunk_state(chunk_id, ChunkState::Failed);
             bail!(message);
         }
-        _ => bail!("Unexpected status: {}", response.status()),
+        _ => {
+            progress.set_chunk_state(chunk_id, ChunkState::Failed);
+            bail!("Unexpected status: {}", response.status())
+        }
     };
     let _content_length = response.content_length();
 
@@ -137,17 +150,22 @@ async fn download_range_async(
                     Some(chunk_result) => {
                         let chunk = chunk_result?;
                         dest.write_all(&chunk).await?;
-                        _downloaded += chunk.len();
+                        downloaded += chunk.len();
+                        progress.update_chunk_bytes(chunk_id, downloaded);
                     },
                     None => break,
                 }
             }
             _ = interrupt_interval.tick() => {
                 if progress.interrupted.load(Ordering::SeqCst) {
+                    progress.set_chunk_state(chunk_id, ChunkState::Failed);
                     bail!("Download interrupted.");
                 }
             }
         }
     }
+
+    // Mark this chunk as completed
+    progress.set_chunk_state(chunk_id, ChunkState::Completed);
     Ok(fname)
 }

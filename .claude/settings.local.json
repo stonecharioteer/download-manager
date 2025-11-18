@@ -9,7 +9,8 @@
       "Bash(for i in {1..5})",
       "Bash(do ps aux)",
       "Bash(done)",
-      "Bash(target/release/dlm:*)"
+      "Bash(target/release/dlm:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
