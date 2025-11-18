@@ -147,142 +147,70 @@ The number "141557760" comes before "70778880" in string sorting because "1" < "
 
 The slight time variation is due to network conditions rather than worker overhead.
 
-## Evolution: Progress Visualization (Task 5 - In Progress)
+### 11. Multi-Worker Progress Visualization
 
-### The Problem
+The multi-worker concurrent download (Task 4) had no progress visualization - users couldn't see which chunks were being downloaded or track individual worker progress. The goal was to create a colored, per-chunk progress bar showing real-time state: `[████░░██░░]`.
 
-With multi-worker downloads implemented, there's no visibility into which chunks are being downloaded. The current progress shows only aggregated bytes, making it impossible to tell:
-- Which workers are actively downloading
-- Which chunks have completed
-- If any chunks are stuck or failed
+[![asciicast](https://asciinema.org/a/am62159WJwd5peJRbQDdTrQ9V.svg)](https://asciinema.org/a/am62159WJwd5peJRbQDdTrQ9V)
 
-### Design: Color-Coded Chunk Progress Bar
+**Initial Challenge**: Progress bars need to know total size upfront, but we only learn `content_length` after the initial HTTP request inside `download_with_workers()`. Creating the progress bar inside the download function would violate our established separation of concerns (download logic shouldn't create UI).
 
-**Goal**: Create a visual progress bar that shows the state of each chunk using colors, while preserving the simple spinner for single-worker downloads.
+**Solution - Content Length Helper**:
+Created `get_content_length(&url)` as a separate function that makes an initial HTTP request just to retrieve `content_length`. This allows the CLI to:
+1. Call `get_content_length()` first
+2. Create `ChunkProgressBar` with the correct size
+3. Pass the progress bar to `download_with_workers()`
 
-**Visual design**:
-```
-[████░░██░░] Downloaded: 135 MB / 270 MB @ 5.2 MB/s
-```
+This maintains clean separation: the CLI handles all HTTP metadata requests for UI purposes, while download functions focus purely on downloading.
 
-**Color scheme**:
-- Green `█`: Completed chunks
-- Yellow/Cyan `█`: Actively downloading (different colors per worker for visual distinction)
-- Gray `░`: Pending chunks
-- Red `█`: Failed chunks
+**ChunkProgressBar Design**:
+- **`ChunkState` enum**: `Pending`, `Downloading { worker_id }`, `Completed`, `Failed`
+- **Thread-safe state tracking**: `Arc<Mutex<Vec<ChunkState>>>` for per-chunk states (needs mutation from multiple workers)
+- **Lock-free byte tracking**: `Vec<Arc<AtomicUsize>>` for per-chunk bytes downloaded (high-frequency updates)
+- **Colored rendering**: Using `colored` crate - green for completed, yellow/cyan/magenta for downloading (different colors per worker), gray for pending, red for failed
 
-### Implementation Approach
+**Worker Integration**:
+Modified `download_range_async()` to accept `chunk_id` and report progress:
+- Sets state to `Downloading { worker_id: chunk_id }` when starting
+- Calls `progress.update_chunk_bytes(chunk_id, downloaded)` on each received chunk
+- Sets state to `Completed` on success or `Failed` on error/interrupt
 
-**1. New Types**:
-```rust
-enum ChunkState {
-    Pending,
-    Downloading { worker_id: usize },
-    Completed,
-    Failed,
-}
+Changed the loop to use `chunks_array.into_iter().enumerate()` instead of `.iter()` to avoid lifetime issues with spawned tasks borrowing from a local vector.
 
-struct ChunkProgressBar {
-    bar: indicatif::ProgressBar,           // Underlying progress bar
-    chunks: Arc<Mutex<Vec<ChunkState>>>,   // Thread-safe chunk states
-    bytes_per_chunk: Vec<Arc<AtomicUsize>>, // Per-chunk progress
-    total_bytes: u64,
-    interrupted: Arc<AtomicBool>,
-}
-```
+**CLI Rendering Management**:
+The CLI now:
+1. Gets content length via helper
+2. Creates `ChunkProgressBar`
+3. Spawns background task that calls `progress.render()` every 100ms
+4. Calls `download_with_workers()` with the progress bar
+5. Aborts render task when download completes
+6. Calls `progress.finish()` with completion message
 
-**2. Key Methods**:
-- `new(num_chunks, total_bytes)` - Initialize with N chunks
-- `set_chunk_state(chunk_id, state)` - Update chunk state (Pending → Downloading → Completed)
-- `update_chunk_bytes(chunk_id, bytes)` - Track per-chunk progress
-- `render_chunks()` - Generate colored visualization string using `colored` crate
-- `render()` - Update progress bar with chunk visualization and stats
+This keeps rendering completely in the CLI layer while download functions only update state.
 
-**3. Thread Safety**:
-- `Arc<Mutex<Vec<ChunkState>>>` for chunk states (needs mutable access from multiple workers)
-- `Vec<Arc<AtomicUsize>>` for byte counts (lock-free updates)
-- `Arc<AtomicBool>` for interrupt flag (shared across all workers)
-
-### Planned Unification: ProgressTracker Trait
-
-**Challenge**: Two different progress visualizations needed:
-- Single-worker (N=1): Simple spinner with bytes downloaded
-- Multi-worker (N>1): Color-coded chunk visualization
-
-**Current approach** (temporary): Use `DownloadProgress` for single-worker, `ChunkProgressBar` for multi-worker. This leads to code duplication in CLI match arms.
-
-**Planned solution**: Create a `ProgressTracker` trait to abstract both:
-
+**ProgressTracker Trait**:
+Created a common trait for both `DownloadProgress` and `ChunkProgressBar`:
 ```rust
 trait ProgressTracker: Send + Sync + Clone {
     fn interrupted(&self) -> Arc<AtomicBool>;
+    fn update_progress(&self, bytes: usize);
     fn render(&self);
     fn finish(&self, msg: &str);
     fn abandon(&self, msg: &str);
 }
-
-impl ProgressTracker for DownloadProgress { /* spinner behavior */ }
-impl ProgressTracker for ChunkProgressBar { /* chunk visualization */ }
 ```
 
-This enables a single generic download function:
-```rust
-async fn download_file<P: ProgressTracker>(
-    url: Url,
-    target_dir: &Path,
-    workers: usize,
-    progress: P,
-) -> anyhow::Result<PathBuf>
-```
+Chunk-specific methods like `set_chunk_state()` and `update_chunk_bytes()` stay in the `ChunkProgressBar` implementation, not in the trait. This maintains the abstraction (trait handles common progress concerns) while allowing type-specific functionality.
 
-**Benefits**:
-- Eliminates code duplication in CLI
-- Single download function handles both single and multi-worker cases
-- Easy to add new progress types (e.g., JSON output, silent mode)
-- Type-safe polymorphism without runtime overhead (monomorphization)
+**Refactoring Hashing to Execute**:
+All three download methods (`download_blocking`, `download_async_single`, `download_async_multi`) were duplicating the same hashing logic at the end. Since hashing is common post-processing (not part of the download implementation), we:
+1. Changed all download methods to return `PathBuf` instead of `()`
+2. Moved hashing logic into `execute()` after the match statement
+3. Now hashing happens once in one place for all download types
 
-**Trade-offs considered**:
-- Could use single type with N=1 for single-worker, but spinner UX is simpler for that case
-- Trait approach adds abstraction but gains flexibility and maintainability
-- Generic functions get monomorphized, so no runtime cost
-
-### Implementation Complete
-
-**Progress Bar Integration** (Completed):
-
-1. **Created `get_content_length()` helper function**:
-   - Separate HTTP request to get content length before download
-   - Allows CLI to create progress bar with correct size
-   - Clean separation: CLI doesn't know about HTTP details, download functions don't create UI
-
-2. **Implemented `ChunkProgressBar`**:
-   - Tracks state per chunk: `Pending`, `Downloading`, `Completed`, `Failed`
-   - Colored visualization: `[████░░██░░]` with different colors per worker
-   - Thread-safe with `Arc<Mutex<Vec<ChunkState>>>` for states
-   - Per-chunk byte tracking with `Vec<Arc<AtomicUsize>>`
-   - Renders download speed and progress
-
-3. **Updated workers to report progress**:
-   - Each worker receives `chunk_id` and reports state changes
-   - Sets `Downloading` state when starting
-   - Updates byte count with `update_chunk_bytes()` on each chunk received
-   - Sets `Completed` on success or `Failed` on error/interrupt
-
-4. **CLI layer manages rendering**:
-   - Gets content length first via `get_content_length()`
-   - Creates `ChunkProgressBar` with proper size
-   - Spawns background task that calls `render()` every 100ms
-   - Aborts render task when download completes
-   - Calls `finish()` to clean up progress bar
-
-5. **Implemented `ProgressTracker` trait**:
-   - Common interface for `DownloadProgress` and `ChunkProgressBar`
-   - Methods: `interrupted()`, `update_progress()`, `render()`, `finish()`, `abandon()`
-   - Chunk-specific methods stay in `ChunkProgressBar` implementation
-   - Maintains separation of concerns
-
-**Architecture Benefits**:
-- Download functions update state, don't handle rendering
-- CLI handles all UI concerns (creation, rendering, cleanup)
-- Easy to add new progress types (e.g., JSON, silent mode)
-- Type-safe with zero runtime overhead (trait monomorphization)
+**Benefits of This Approach**:
+- Clean separation: Download functions update state, CLI handles UI lifecycle
+- Testable: Progress tracking can be tested independently of download logic
+- Extensible: Easy to add new progress types (JSON output, silent mode) by implementing the trait
+- Type-safe: Trait-based polymorphism with zero runtime cost (monomorphization)
+- Maintainable: Hashing logic isn't duplicated across three methods
