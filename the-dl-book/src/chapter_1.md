@@ -20,15 +20,104 @@ disk. And since downloads are rather annoying, it should also *verify* said file
 >
 > The source code for this part is available in the repo as [v0.1-task1-blocking-mvp](https://github.com/stonecharioteer/download-manager/tree/v0.1-task1-blocking-mvp).
 
+### First Steps
+
 First, let's just write the "core" functionality for the above URL.
 
 ```rust
-fn main() {
-  
+use reqwest::blocking::get;
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    const URL: &str =
+        "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-standard-3.23.0-x86_64.iso";
+
+    let response = get(URL)?;
+    let bytes = response.bytes()?;
+    std::fs::write("alpine-standard-3.23.0-x86_64.iso", bytes)?;
+
+    Ok(())
 }
 ```
 
+We're using the `reqwest` crate, with the `reqwuest::blocking::get` method. For now, let's just download this
+file using a single-threaded approach, it is fairly inefficient though. We'll update it later, but for now, this is sufficient.
+
+### CLI With `clap`
+
+That's *fairly simple*. Now, let's add a CLI interface so we don't have to hardcode the URL. Here’s the same logic, but driven by a tiny `clap` CLI so the URL (as well as a target directory and overwrite flag) come from the user.
+
+```rust
+use clap::Parser;
+use reqwest::blocking::get;
+
+#[derive(Parser)]
+struct Cli {
+    /// URL to download
+    url: String,
+
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    let response = get(&cli.url)?;
+    let bytes = response.bytes()?;
+    let filename = cli.url.split('/').last().unwrap_or("download.bin");
+    std::fs::write(&filename, bytes)?;
+    println!("Downloaded to {}", destination.display());
+    Ok(())
+}
+```
+
+You'll notice the `cli.url.split('/').last().unwrap_or("download.bin");` section immediately. This only falls back when the url string is empty. The CLI requires a non-empty URL argument, so this almost never triggers. but this prevents against an empty string, like when invoking the binary with `--url ""` perhaps.
+
+### Additional Arguments
+Now, let's add some niceties to this command line interface. We could have an argument that sets the directory you'd download said file to, and perhaps one to choose to overwrite the file if it exists.
+
+```rust
+use clap::Parser;
+use reqwest::blocking::get;
+
+#[derive(Parser)]
+struct Cli {
+    /// URL to download
+    url: String,
+
+    /// Target directory for the download
+    #[arg(long, default_value = ".download")]
+    target_dir: String,
+
+    /// overwrite existing file
+    #[arg(long)]
+    overwrite: bool,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    let response = get(&cli.url)?;
+    let bytes = response.bytes()?;
+    let filename = cli.url.split('/').last().unwrap_or("download.bin");
+
+    let target_dir = std::path::Path::new(&cli.target_dir);
+    std::fs::create_dir_all(target_dir)?;
+    let destination = target_dir.join(filename);
+
+    if destination.exists() && !cli.overwrite {
+        return Err("file already exists; add --overwrite to replace".into());
+    }
+
+    std::fs::write(&destination, bytes)?;
+    println!("Downloaded to {}", destination.display());
+    Ok(())
+}
+```
+
+While this works and we *could* stop here, it'd be great to add a progress bar to see what's being downloaded.
+
+### Reporting Progress
+
+This starts our complexity.
+
+### Bringing it All Together
 
 ```rust
 use hex;
@@ -43,7 +132,6 @@ use std::sync::{
 };
 use std::time::Duration;
 use std::time::Instant;
-
 use clap::Parser;
 
 /// Download manager application.
@@ -235,3 +323,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+### Downloading in Parallel
+
+Now, let's rethink this problem. I said earlier that the `reqwest::blocking::get` is inefficient and we need to rethink it.
