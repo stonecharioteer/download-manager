@@ -6,3 +6,5 @@ description = "A book on writing Rust code to download. What, you ask? *Everythi
 
 [output.html]
 admonitions = true
+git-repository-url = "https://github.com/stonecharioteer/download-manager"
+git-repository-icon = "fab-github"
