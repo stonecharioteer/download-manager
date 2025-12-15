@@ -1,5 +1,9 @@
 # Introduction
 
+> [!WARNING]
+> This book is incomplete right now (Dec 15, 2025). I am currently working on it, and you can contact me about it
+> at `mail [at] stonecharioteer.com` if you're interested in it.
+
 Have you ever wanted to download something? No? You're not me? Well then. I don't know how to help you.
 But if you do, and if you also wanted to download something using code, then you're in luck. If you're looking
 for humour, satire and possibly catastrophe, you are in the right place. Also, of course, if you're looking
