@@ -91,12 +91,13 @@ design decisions, evolution notes, and key learnings are documented in
 
 ## Formatting
 
-Markdown sources (including the chapter drafts under `the-dl-book/src`) follow a
-shared Prettier setup so prose stays wrapped at 80 characters. Install Prettier
-globally with `npm i -g prettier` so the `just` recipes can call the binary,
-then run `just format-md` (or `just check-md`) to execute
-`prettier --write '**/*.md'`/`prettier --check '**/*.md'`. Generated output
-directories are skipped via `.prettierrc.cjs` and `.prettierignore`.
+Top-level Markdown sources follow a shared Prettier setup so prose stays wrapped
+at 80 characters. Install Prettier globally with `npm i -g prettier` so the `just`
+recipes can call the binary, then run `just format-md` (or `just check-md`) to
+execute `prettier --write '**/*.md'`/`prettier --check '**/*.md'`. Generated
+output directories are skipped via `.prettierrc.cjs` and `.prettierignore`. Note
+that `the-dl-book/src/` is ignored because Prettier’s reflow breaks the admonition
+blocks inside those chapter drafts.
 
 ## Building
 

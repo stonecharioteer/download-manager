@@ -1,6 +1,8 @@
 # Introduction
 
-> [!WARNING] This book is incomplete right now (Dec 15, 2025). I am currently
+> [!WARNING]
+>
+> This book is incomplete right now (Dec 15, 2025). I am currently
 > working on it, and you can contact me about it at
 > `mail [at] stonecharioteer.com` if you're interested in it.
 
