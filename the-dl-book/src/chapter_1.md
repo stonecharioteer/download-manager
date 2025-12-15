@@ -115,7 +115,70 @@ While this works and we *could* stop here, it'd be great to add a progress bar t
 
 ### Reporting Progress
 
-This starts our complexity.
+The `indicatif` crate is really useful if you want to play with progress bars. To make the download manager a little
+more user-friendly, let's add a small spinner that shows off how much of the file is downloaded and what's pending.
+
+```rust
+use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::blocking::get;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::path::Path;
+
+#[derive(Parser)]
+struct Cli {
+    /// URL to download
+    url: String,
+
+    /// Target directory for the download
+    #[arg(long, default_value = ".download")]
+    target_dir: String,
+
+    /// Overwrite existing file
+    #[arg(long)]
+    overwrite: bool,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    let response = get(&cli.url)?;
+    let total_bytes = response.content_length().unwrap_or(0);
+    let bar = ProgressBar::new(total_bytes);
+    bar.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec})")
+            .unwrap(),
+    );
+
+    let filename = cli.url.split('/').last().unwrap_or("download.bin");
+    let target_dir = Path::new(&cli.target_dir);
+    std::fs::create_dir_all(target_dir)?;
+    let destination = target_dir.join(filename);
+
+    if destination.exists() && !cli.overwrite {
+        let message = format!("File exists at: '{}'", destination.display());
+        return Err(message.into());
+    }
+
+    let mut file = File::create(&destination)?;
+    let mut stream = response;
+    let mut buffer = [0_u8; 32 * 1024];
+
+    while let Ok(bytes_read) = stream.read(&mut buffer) {
+        if bytes_read == 0 {
+            break;
+        }
+        file.write_all(&buffer[..bytes_read])?;
+        bar.inc(bytes_read as u64);
+    }
+
+    bar.finish_with_message("download complete");
+    Ok(())
+}
+```
+
+There are still some improvements we can make here.
 
 ### Bringing it All Together
 
