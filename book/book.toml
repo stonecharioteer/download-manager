@@ -1,0 +1,5 @@
+[book]
+title = "The Rust Download Book"
+authors = ["Vinay Keerthi"]
+language = "en"
+description = "A book on writing Rust code to download. What, you ask? *Everything*"
