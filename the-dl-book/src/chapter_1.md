@@ -387,6 +387,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Downloading in Parallel
+## Downloading in Parallel
 
 Now, let's rethink this problem. I said earlier that the `reqwest::blocking::get` is inefficient and we need to rethink it.
