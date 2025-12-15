@@ -1,0 +1,10 @@
+# Prettier should skip build artifacts and editor folders
+target/
+the-dl-book/book/
+node_modules/
+.idea/
+.vscode/
+*.log
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
