@@ -1,10 +1,14 @@
 # Download Manager (dlm)
 
-A Rust learning project exploring async programming, concurrency, and systems design through building a feature-rich file download manager.
+A Rust learning project exploring async programming, concurrency, and systems
+design through building a feature-rich file download manager.
 
 ## About This Project
 
-This is a learning exercise where I'm relearning Rust by building a progressively complex download manager from scratch. The project follows a structured learning path, starting with basic blocking downloads and evolving into a concurrent, multi-worker system with real-time progress visualization.
+This is a learning exercise where I'm relearning Rust by building a
+progressively complex download manager from scratch. The project follows a
+structured learning path, starting with basic blocking downloads and evolving
+into a concurrent, multi-worker system with real-time progress visualization.
 
 **Focus Areas:**
 
@@ -40,10 +44,12 @@ Multi-worker download with live progress visualization:
 
 ## Features
 
-- **Multiple download modes**: Blocking, async single-worker, and async multi-worker
+- **Multiple download modes**: Blocking, async single-worker, and async
+  multi-worker
 - **Resume capability**: Automatically resume interrupted downloads
 - **Progress tracking**: Real-time visualization with download speed and ETA
-- **Multi-worker visualization**: Color-coded chunk progress for concurrent downloads
+- **Multi-worker visualization**: Color-coded chunk progress for concurrent
+  downloads
 - **SHA256 verification**: Streaming hash calculation for file integrity
 - **Graceful interrupts**: Clean Ctrl-C handling with proper cleanup
 
@@ -70,7 +76,10 @@ cargo run -- download-async --workers 4 \
 
 ## Implementation Notes
 
-The project emphasizes learning through iteration. Each task builds on the previous one, introducing new Rust concepts and architectural patterns. Detailed design decisions, evolution notes, and key learnings are documented in [implementation.md](implementation.md).
+The project emphasizes learning through iteration. Each task builds on the
+previous one, introducing new Rust concepts and architectural patterns. Detailed
+design decisions, evolution notes, and key learnings are documented in
+[implementation.md](implementation.md).
 
 **Key architectural decisions:**
 
@@ -79,6 +88,16 @@ The project emphasizes learning through iteration. Each task builds on the previ
 - Lock-free progress tracking with atomics for performance
 - Trait-based abstraction for different progress visualizations
 - Clean separation between blocking and async implementations
+
+## Formatting
+
+Top-level Markdown sources follow a shared Prettier setup so prose stays wrapped
+at 80 characters. Install Prettier globally with `npm i -g prettier` so the `just`
+recipes can call the binary, then run `just format-md` (or `just check-md`) to
+execute `prettier --write '**/*.md'`/`prettier --check '**/*.md'`. Generated
+output directories are skipped via `.prettierrc.cjs` and `.prettierignore`. Note
+that `the-dl-book/src/` is ignored because Prettier’s reflow breaks the admonition
+blocks inside those chapter drafts.
 
 ## Building
 
@@ -95,14 +114,17 @@ cargo run -- download-async --workers 4 <url>
 
 ## Learning Resources
 
-This project follows a self-directed learning path documented in [FEATURES.md](FEATURES.md). Each task includes:
+This project follows a self-directed learning path documented in
+[FEATURES.md](FEATURES.md). Each task includes:
 
 - Build goals
 - Relevant reading/search queries
 - Self-check criteria
 
-The [implementation.md](implementation.md) document chronicles the evolution of the codebase, design decisions, and lessons learned at each stage.
+The [implementation.md](implementation.md) document chronicles the evolution of
+the codebase, design decisions, and lessons learned at each stage.
 
 ## License
 
-This is a personal learning project. Feel free to use it as reference for your own Rust learning journey.
+This is a personal learning project. Feel free to use it as reference for your
+own Rust learning journey.

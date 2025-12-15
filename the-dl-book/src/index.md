@@ -1,27 +1,38 @@
 # Introduction
 
-> [!WARNING]
-> This book is incomplete right now (Dec 15, 2025). I am currently working on it, and you can contact me about it
-> at `mail [at] stonecharioteer.com` if you're interested in it.
+```admonish warning
+This book is incomplete right now (Dec 15, 2025). I am currently
+working on it, and you can contact me about it at
+`mail [at] stonecharioteer.com` if you're interested in it.
+```
 
-Have you ever wanted to download something? No? You're not me? Well then. I don't know how to help you.
-But if you do, and if you also wanted to download something using code, then you're in luck. If you're looking
-for humour, satire and possibly catastrophe, you are in the right place. Also, of course, if you're looking
-for some Rust.
+Have you ever wanted to download something? No? You're not me? Well then. I
+don't know how to help you. But if you do, and if you also wanted to download
+something using code, then you're in luck. If you're looking for humour, satire
+and possibly catastrophe, you are in the right place. Also, of course, if you're
+looking for some Rust.
 
-What _is_ this book, you ask? It's not a Rust tutorial. If you want that, you should go to the Rust book. Trust me,
-any attempt to learn Rust by following _this_ book is futile. I will not teach you Rust. Do _I_ even know Rust? I have no clue. Let's see by the end of this ludicrous exercise.
+What _is_ this book, you ask? It's not a Rust tutorial. If you want that, you
+should go to the Rust book. Trust me, any attempt to learn Rust by following
+_this_ book is futile. I will not teach you Rust. Do _I_ even know Rust? I have
+no clue. Let's see by the end of this ludicrous exercise.
 
-I wanted to write a download manager to understand Rust better. It had been a hot minute since I'd written Rust, and a friend
-commented that I should try writing a download manager. I also wanted to write a bittorrent client. And I was also investigating
-how data is transmitted from databases and what I could learn from that.
+I wanted to write a download manager to understand Rust better. It had been a
+hot minute since I'd written Rust, and a friend commented that I should try
+writing a download manager. I also wanted to write a bittorrent client. And I
+was also investigating how data is transmitted from databases and what I could
+learn from that.
 
-You see, I am curious to a fault and thought perhaps I should write something like an _overengineered_ download manager.
-And then, I realized I wanted to write something that can download _anything_. So that's the goal of this "book". My mom always
-says that the best way to learn something is to write, and that's what I grew up on so we're doing this. I'm writing a book
-on how to build the most over-engineered download manager you can find. And what are we going to download, you ask?
+You see, I am curious to a fault and thought perhaps I should write something
+like an _overengineered_ download manager. And then, I realized I wanted to
+write something that can download _anything_. So that's the goal of this "book".
+My mom always says that the best way to learn something is to write, and that's
+what I grew up on so we're doing this. I'm writing a book on how to build the
+most over-engineered download manager you can find. And what are we going to
+download, you ask?
 
 That's the fun part.
+
 
 ## Laundry List
 

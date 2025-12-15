@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](./index.md)
+[Meet Mack](./meet_mack.md)
 
 - [What _is_ a download, anyway?](./chapter_1.md)
 - [`wget` my friend](./chapter_2.md)

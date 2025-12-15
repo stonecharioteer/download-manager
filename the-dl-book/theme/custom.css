@@ -1,0 +1,84 @@
+/* Custom caricature sprites for mdbook-admonish admonitions */
+
+/* Adjust padding to accommodate larger sprites */
+:is(.admonition-title, summary.admonition-title) {
+  padding-inline-start: 7.5rem !important;
+  min-height: 5rem !important;
+}
+
+/* Override the icon with caricature sprites */
+:is(.admonition-title, summary.admonition-title)::before {
+  position: absolute !important;
+  top: 0.5rem !important;
+  inset-inline-start: 1rem !important;
+  width: 60px !important;
+  height: 60px !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-color: transparent !important;
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+
+/* Unique admonition types with unique sprites */
+
+/* 1. Note - plain_1.png */
+:is(.admonish-note) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/plain_1.png') !important;
+}
+
+/* 2. Abstract/Summary - puzzled_1.png */
+:is(.admonish-abstract, .admonish-summary, .admonish-tldr) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/puzzled_1.png') !important;
+}
+
+/* 3. Info - smile_bashful_1.png */
+:is(.admonish-info, .admonish-todo) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/smile_bashful_1.png') !important;
+}
+
+/* 4. Tip/Hint/Important - happy_1.png */
+:is(.admonish-tip, .admonish-hint, .admonish-important) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/happy_1.png') !important;
+}
+
+/* 5. Success - cry_happy_1.png */
+:is(.admonish-success, .admonish-check, .admonish-done) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/cry_happy_1.png') !important;
+}
+
+/* 6. Question - amaze_1.png */
+:is(.admonish-question, .admonish-help, .admonish-faq) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/amaze_1.png') !important;
+}
+
+/* 7. Warning/Caution/Attention - yell_angry.png */
+:is(.admonish-warning, .admonish-caution, .admonish-attention) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/yell_angry.png') !important;
+}
+
+/* 8. Failure - cry_sad_1.png */
+:is(.admonish-failure, .admonish-fail, .admonish-missing) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/cry_sad_1.png') !important;
+}
+
+/* 9. Danger/Error - shock_1.png */
+:is(.admonish-danger, .admonish-error) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/shock_1.png') !important;
+}
+
+/* 10. Bug - annoyed_1.png */
+:is(.admonish-bug) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/annoyed_1.png') !important;
+}
+
+/* 11. Example - smile_wicked_1.png */
+:is(.admonish-example) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/smile_wicked_1.png') !important;
+}
+
+/* 12. Quote - love_1.png */
+:is(.admonish-quote, .admonish-cite) > :is(.admonition-title, summary.admonition-title)::before {
+  background-image: url('../sprites/love_1.png') !important;
+}
