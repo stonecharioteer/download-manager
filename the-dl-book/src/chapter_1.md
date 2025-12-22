@@ -1,5 +1,13 @@
 # Chapter 1 - What is a download anyway?
 
+```admonish abstract title="Chapter Guide"
+**What you'll build:** A CLI tool that downloads files over HTTP with concurrent chunks, progress tracking, pause/resume, and SHA256 verification.
+
+**What you'll learn:** Async Rust with tokio, HTTP range requests, atomic progress tracking, state persistence, graceful shutdown.
+
+**End state:** All the work from Tasks 1-8 lives here. By the end of this chapter, you have a working HTTP downloader that handles edge cases and can be paused/resumed.
+```
+
 It's 2006, you're downloading a file from the internet. Let's assume that you're
 downloading a Linux ISO, you know, legal stuff.
 
@@ -9,22 +17,28 @@ You get the link, which looks like this.
 https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-standard-3.23.0-x86_64.iso
 ```
 
-This is a HTTP file, something you can download with any browser, or by using `cURL` or `wget`.
+This is a *static download*, a file that's served over HTTP, downloadable using your browser, `curl` or `wget`.
+Downloading it is simply sending a HTTP request and receiving a response with some headers and a body, where said body is a stream of bytes representing a file.
+
+```admonish important
+The headers aren't really important right now, but you should remember that they exist. These are sadly server-specific, and not all of them are implemented. The right header will tell you how big a file is and you can figure out how much time it could take depending on how much you've already downloaded. If you've ever thought to yourself "Hey, wait a minute, why doesn't this progress bar tell me how much time this download takes?", it's *probably*
+because the server didn't tell the client (your browser in this case) how big the file is.
+```
 
 Now, how would you write something in Rust that does just that? It should download this file and write to
 disk. And since downloads are rather annoying, it should also *verify* said file, using `sha256sum`.
 
 ## A Simple Download CLI
 
-> [!NOTE]
->
-> The source code for this part is available in the repo as [v0.1-task1-blocking-mvp](https://github.com/stonecharioteer/download-manager/tree/v0.1-task1-blocking-mvp).
+```admonish tip
+The source code for this part is available in the repo as [v0.1-task1-blocking-mvp](https://github.com/stonecharioteer/download-manager/tree/v0.1-task1-blocking-mvp).
+```
 
 ### First Steps
 
 First, let's just write the "core" functionality for the above URL.
 
-```rust
+```rust,linenos
 use reqwest::blocking::get;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,7 +60,7 @@ file using a single-threaded approach, it is fairly inefficient though. We'll up
 
 That's *fairly simple*. Now, let's add a CLI interface so we don't have to hardcode the URL. Here’s the same logic, but driven by a tiny `clap` CLI so the URL (as well as a target directory and overwrite flag) come from the user.
 
-```rust
+```rust,linenos
 use clap::Parser;
 use reqwest::blocking::get;
 
@@ -73,7 +87,7 @@ You'll notice the `cli.url.split('/').last().unwrap_or("download.bin");` section
 ### Additional Arguments
 Now, let's add some niceties to this command line interface. We could have an argument that sets the directory you'd download said file to, and perhaps one to choose to overwrite the file if it exists.
 
-```rust
+```rust,linenos
 use clap::Parser;
 use reqwest::blocking::get;
 
@@ -118,7 +132,7 @@ While this works and we *could* stop here, it'd be great to add a progress bar t
 The `indicatif` crate is really useful if you want to play with progress bars. To make the download manager a little
 more user-friendly, let's add a small spinner that shows off how much of the file is downloaded and what's pending.
 
-```rust
+```rust,linenos
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::get;
@@ -182,7 +196,7 @@ There are still some improvements we can make here.
 
 ### Bringing it All Together
 
-```rust
+```rust,linenos
 use hex;
 use indicatif::{HumanBytes, ProgressBar};
 use sha2::{Digest, Sha256};
